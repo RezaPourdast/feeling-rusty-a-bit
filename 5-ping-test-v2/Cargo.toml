@@ -1,0 +1,9 @@
+[package]
+name = "Ping_Test"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sdl2 = { version = "0.36", features = ["ttf", "image"] }
+ping = "0.6.1"
+lazy_static = "1.4"

@@ -1,0 +1,8 @@
+[package]
+name = "Image_Viewer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+image = "0.25.5"
+minifb = "0.28.0"
