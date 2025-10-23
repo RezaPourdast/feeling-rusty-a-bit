@@ -1,10 +1,14 @@
 [package]
-name = "don-setter"
+name = "dns-setter"
 version = "0.1.0"
 edition = "2024"
+
+[build-dependencies]
+winres = "0.1"
 
 [dependencies]
 eframe = { version = "0.33.0", features = ["default", "__screenshot"] }
 egui_extras = { version = "0.33.0", features = ["default", "all_loaders"] }
 env_logger = { version = "0.11.8", features = ["auto-color", "humantime"] }
 image = { version = "0.25.8", features = ["jpeg", "png"] }
+regex = "1.12.2"
