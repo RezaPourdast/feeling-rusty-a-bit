@@ -1,3 +1,5 @@
+//! DNS Setter - Windows GUI for managing DNS settings
+
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use eframe::egui::{self, Vec2};
@@ -5,11 +7,12 @@ use regex::Regex;
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
 
-const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+
+const CREATE_NO_WINDOW: u32 = 0x08000000; // Hide console window
 
 fn main() -> eframe::Result {
     env_logger::init();
-
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([400.0, 600.0]),
         centered: true,
@@ -110,6 +113,7 @@ fn get_active_adapter() -> Option<String> {
 
     for line in stdout.lines() {
         if line.contains("Connected") && line.contains("Dedicated") {
+            // Extract adapter name (last word in the line)
             let parts: Vec<&str> = line.split_whitespace().collect();
             return parts.last().map(|s| s.to_string());
         }
@@ -127,7 +131,7 @@ fn get_current_dns(adapter: &str) -> Vec<String> {
     ]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    let re = Regex::new(r"\b\d{1,3}(?:\.\d{1,3}){3}\b").unwrap();
+    let re = Regex::new(r"\b\d{1,3}(?:\.\d{1,3}){3}\b").unwrap(); // Match IPv4 addresses
     re.find_iter(&stdout)
         .map(|m| m.as_str().to_string())
         .collect()
