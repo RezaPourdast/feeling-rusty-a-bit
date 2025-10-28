@@ -225,8 +225,10 @@ impl eframe::App for MyApp {
 
                 ui.add_space(40.0);
 
-                // NEW: Action buttons with enum operations
-                self.render_action_buttons(ui);
+                ui.horizontal(|ui| {
+                    ui.add_space(45.0); // Left margin
+                    self.render_action_buttons(ui);
+                });
             });
         });
     }
@@ -310,48 +312,67 @@ impl MyApp {
     }
 
     fn render_action_buttons(&mut self, ui: &mut egui::Ui) {
-        // NEW: Set DNS button with dynamic text
-        if ui
-            .add_sized(
-                Vec2::new(180.0, 50.0),
-                egui::Button::new(format!("Set {} DNS", self.selected_provider.display_name()))
-                    .corner_radius(10),
-            )
-            .clicked()
-        {
-            self.handle_operation(DnsOperation::Set(self.selected_provider.clone()));
-        }
+        ui.horizontal(|ui| {
+            // Left column
+            ui.vertical(|ui| {
+                // Button 1: Set DNS
+                if ui
+                    .add_sized(
+                        Vec2::new(140.0, 50.0),
+                        egui::Button::new(format!(
+                            "Set {} DNS",
+                            self.selected_provider.display_name()
+                        ))
+                        .corner_radius(10),
+                    )
+                    .clicked()
+                {
+                    self.handle_operation(DnsOperation::Set(self.selected_provider.clone()));
+                }
 
-        // NEW: Multiple action buttons
-        if ui
-            .add_sized(
-                Vec2::new(120.0, 50.0),
-                egui::Button::new("Clear DNS").corner_radius(10),
-            )
-            .clicked()
-        {
-            self.handle_operation(DnsOperation::Clear);
-        }
+                ui.add_space(10.0);
 
-        if ui
-            .add_sized(
-                Vec2::new(120.0, 50.0),
-                egui::Button::new("Refresh").corner_radius(10),
-            )
-            .clicked()
-        {
-            self.handle_operation(DnsOperation::Refresh);
-        }
+                // Button 2: Clear DNS
+                if ui
+                    .add_sized(
+                        Vec2::new(140.0, 50.0),
+                        egui::Button::new("Clear DNS").corner_radius(10),
+                    )
+                    .clicked()
+                {
+                    self.handle_operation(DnsOperation::Clear);
+                }
+            });
 
-        if ui
-            .add_sized(
-                Vec2::new(120.0, 50.0),
-                egui::Button::new("Test DNS").corner_radius(10),
-            )
-            .clicked()
-        {
-            self.handle_operation(DnsOperation::Test);
-        }
+            ui.add_space(5.0); // ← This works here!
+
+            // Right column
+            ui.vertical(|ui| {
+                // Button 3: Refresh
+                if ui
+                    .add_sized(
+                        Vec2::new(140.0, 50.0),
+                        egui::Button::new("Refresh").corner_radius(10),
+                    )
+                    .clicked()
+                {
+                    self.handle_operation(DnsOperation::Refresh);
+                }
+
+                ui.add_space(10.0);
+
+                // Button 4: Test DNS
+                if ui
+                    .add_sized(
+                        Vec2::new(140.0, 50.0),
+                        egui::Button::new("Test DNS").corner_radius(10),
+                    )
+                    .clicked()
+                {
+                    self.handle_operation(DnsOperation::Test);
+                }
+            });
+        });
     }
 
     fn handle_operation(&mut self, operation: DnsOperation) {
