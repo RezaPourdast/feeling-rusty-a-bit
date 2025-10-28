@@ -163,7 +163,11 @@ impl Default for DnsState {
 fn main() -> eframe::Result {
     env_logger::init();
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([400.0, 600.0]),
+        viewport: egui::ViewportBuilder::default()
+            .with_decorations(false)
+            .with_inner_size([400.0, 600.0])
+            .with_min_inner_size([400.0, 600.0])
+            .with_transparent(true),
         centered: true,
         ..Default::default()
     };
@@ -198,18 +202,17 @@ struct MyApp {
 }
 
 impl eframe::App for MyApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.heading("🚀 DNS SETTER");
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        egui::Rgba::TRANSPARENT.to_array()
+    }
 
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        custom_window_frame(ctx, "🚀 DNS SETTER", |ui| {
+            ui.vertical_centered(|ui| {
                 ui.add_space(20.0);
 
                 ui.group(|ui| {
-                    // NEW: Status section with enum-driven display
                     self.render_status_section(ui);
-
-                    // NEW: App state with color-coded feedback
                     self.render_app_state(ui);
                 });
 
@@ -219,14 +222,14 @@ impl eframe::App for MyApp {
                 ui.add_space(20.0);
 
                 ui.horizontal(|ui| {
-                    ui.add_space(140.0); // Left margin
+                    ui.add_space(140.0);
                     self.render_provider_selection(ui);
                 });
 
                 ui.add_space(40.0);
 
                 ui.horizontal(|ui| {
-                    ui.add_space(45.0); // Left margin
+                    ui.add_space(45.0);
                     self.render_action_buttons(ui);
                 });
             });
@@ -290,9 +293,7 @@ impl MyApp {
     /// Render the application state with appropriate colors
     fn render_app_state(&self, ui: &mut egui::Ui) {
         match &self.app_state {
-            AppState::Idle => {
-                // Don't display anything for idle state
-            }
+            AppState::Idle => {}
             AppState::Processing => {
                 ui.horizontal(|ui| {
                     ui.spinner();
@@ -344,7 +345,7 @@ impl MyApp {
                 }
             });
 
-            ui.add_space(5.0); // ← This works here!
+            ui.add_space(5.0);
 
             // Right column
             ui.vertical(|ui| {
@@ -454,6 +455,103 @@ impl MyApp {
         } else {
             self.dns_state = DnsState::Static(self.dns.clone());
         }
+    }
+}
+
+fn custom_window_frame(ctx: &egui::Context, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
+    use egui::{CentralPanel, UiBuilder};
+
+    let panel_frame = egui::Frame::new()
+        .fill(ctx.style().visuals.window_fill())
+        .corner_radius(10)
+        .stroke(ctx.style().visuals.widgets.noninteractive.fg_stroke)
+        .outer_margin(1); // keep stroke within bounds
+
+    CentralPanel::default().frame(panel_frame).show(ctx, |ui| {
+        let app_rect = ui.max_rect();
+
+        let title_bar_height = 32.0;
+        let title_bar_rect = {
+            let mut rect = app_rect;
+            rect.max.y = rect.min.y + title_bar_height;
+            rect
+        };
+        title_bar_ui(ui, title_bar_rect, title);
+
+        // Contents area:
+        let content_rect = {
+            let mut rect = app_rect;
+            rect.min.y = title_bar_rect.max.y;
+            rect
+        }
+        .shrink(4.0);
+
+        let mut content_ui = ui.new_child(UiBuilder::new().max_rect(content_rect));
+        add_contents(&mut content_ui);
+    });
+}
+
+fn title_bar_ui(ui: &mut egui::Ui, title_bar_rect: eframe::epaint::Rect, title: &str) {
+    use egui::{Align2, FontId, Id, PointerButton, Sense, UiBuilder, ViewportCommand, vec2};
+
+    let painter = ui.painter();
+
+    let title_bar_response = ui.interact(
+        title_bar_rect,
+        Id::new("title_bar"),
+        Sense::click_and_drag(),
+    );
+
+    // Title text:
+    painter.text(
+        title_bar_rect.center(),
+        Align2::CENTER_CENTER,
+        title,
+        FontId::proportional(20.0),
+        ui.style().visuals.text_color(),
+    );
+
+    // Underline:
+    painter.line_segment(
+        [
+            title_bar_rect.left_bottom() + vec2(1.0, 0.0),
+            title_bar_rect.right_bottom() + vec2(-1.0, 0.0),
+        ],
+        ui.visuals().widgets.noninteractive.bg_stroke,
+    );
+
+    // Drag to move window:
+    if title_bar_response.drag_started_by(PointerButton::Primary) {
+        ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
+    }
+
+    // Right-side window controls:
+    ui.scope_builder(
+        UiBuilder::new()
+            .max_rect(title_bar_rect)
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.visuals_mut().button_frame = false;
+            ui.add_space(8.0);
+            close_maximize_minimize(ui);
+        },
+    );
+}
+
+/// Show some close/maximize/minimize buttons for the native window.
+fn close_maximize_minimize(ui: &mut egui::Ui) {
+    use egui::{Button, RichText, ViewportCommand};
+
+    let button_height = 20.0;
+
+    let close_resp = ui
+        .add(Button::new(RichText::new("❌").size(button_height)))
+        .on_hover_text("Close the window")
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+
+    if close_resp.clicked() {
+        ui.ctx().send_viewport_cmd(ViewportCommand::Close);
     }
 }
 
