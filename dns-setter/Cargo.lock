@@ -911,12 +911,13 @@ dependencies = [
 
 [[package]]
 name = "dns-setter"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "eframe",
  "egui_extras",
  "env_logger",
  "image",
+ "ping",
  "regex",
  "winres",
 ]
@@ -2794,6 +2795,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
+name = "ping"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81b4488e1f58b23169e168e9c85dc16e817fb9655de81ce1206f7d575f750e04"
+dependencies = [
+ "rand",
+ "socket2",
+ "thiserror 2.0.17",
+]
+
+[[package]]
 name = "piper"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3464,6 +3476,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd538fb6910ac1099850255cf94a94df6551fbdd602454387d0adb2d1ca6dead"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "socket2"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17129e116933cf371d018bb80ae557e889637989d8638274fb25622827b03881"
+dependencies = [
+ "libc",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
