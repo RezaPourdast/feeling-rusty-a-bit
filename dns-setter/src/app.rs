@@ -1,6 +1,7 @@
 //! Application state, egui integration, and UI rendering.
 
 use ping;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -29,6 +30,10 @@ pub struct MyApp {
     ping_sender: Option<mpsc::Sender<f64>>,
     ping_receiver: Option<mpsc::Receiver<f64>>,
 }
+
+// When the title-bar ping button is clicked we set this flag.
+// `update()` will pick it up and start the ping thread / open the window.
+static PING_REQUEST: AtomicBool = AtomicBool::new(false);
 
 impl MyApp {
     pub fn new() -> Self {
@@ -116,34 +121,31 @@ impl eframe::App for MyApp {
                 ui.add_space(40.0);
 
                 ui.horizontal(|ui| {
-                    ui.add_space(45.0);
+                    ui.add_space(55.0);
                     self.render_action_buttons(ui);
                 });
 
                 ui.add_space(70.0);
-
-                if ui.button("See your ping").clicked() {
-                    // Start ping thread when opening the secondary window (if not already started)
-                    if self.ping_sender.is_none() {
-                        let (tx, rx) = mpsc::channel::<f64>();
-                        self.ping_sender = Some(tx.clone());
-                        self.ping_receiver = Some(rx);
-
-                        thread::spawn(move || {
-                            loop {
-                                let value = get_ping();
-                                if tx.send(value).is_err() {
-                                    // receiver dropped, exit thread
-                                    break;
-                                }
-                                thread::sleep(Duration::from_secs(1));
-                            }
-                        });
-                    }
-                    self.show_second_window = true;
-                }
             });
         });
+
+        // If the title-bar ping button was clicked, start the ping thread / open the window.
+        if PING_REQUEST.swap(false, Ordering::SeqCst) {
+            if self.ping_sender.is_none() {
+                let (tx, rx) = mpsc::channel::<f64>();
+                self.ping_sender = Some(tx.clone());
+                self.ping_receiver = Some(rx);
+
+                thread::spawn(move || loop {
+                    let value = get_ping();
+                    if tx.send(value).is_err() {
+                        break;
+                    }
+                    thread::sleep(Duration::from_secs(1));
+                });
+            }
+            self.show_second_window = true;
+        }
 
         self.render_secondary_viewport(ctx);
         ctx.request_repaint_after(Duration::from_millis(1000));
@@ -151,7 +153,6 @@ impl eframe::App for MyApp {
 }
 
 impl MyApp {
-    /// Render an IP address input with 4 separate octet fields.
     fn render_ip_input(ui: &mut egui::Ui, octets: &mut [String; 4], label: &str) {
         ui.horizontal(|ui| {
             ui.label(format!("{}: ", label));
@@ -167,9 +168,7 @@ impl MyApp {
                 if response.changed() {
                     *octet = octet.chars().filter(|c| c.is_ascii_digit()).collect();
 
-                    if octet.len() == 3 && i < 3 {
-                        // next field auto-focused by egui on next frame
-                    }
+                    if octet.len() == 3 && i < 3 {}
                 }
 
                 if i < 3 {
@@ -243,12 +242,6 @@ impl MyApp {
                 Self::octets_to_ip(&self.custom_secondary),
             );
         }
-
-        ui.add_space(10.0);
-        ui.label(
-            egui::RichText::new(self.selected_provider.description())
-                .color(egui::Color32::LIGHT_GRAY),
-        );
     }
 
     fn render_app_state(&self, ui: &mut egui::Ui) {
@@ -273,15 +266,20 @@ impl MyApp {
     }
 
     fn render_action_buttons(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
+        ui.vertical(|ui| {
+            // Set DNS and Clear DNS side-by-side
+            ui.horizontal(|ui| {
                 if ui
                     .add_sized(
-                        Vec2::new(140.0, 50.0),
-                        egui::Button::new(format!(
-                            "Set {} DNS",
-                            self.selected_provider.display_name()
-                        ))
+                        Vec2::new(130.0, 50.0),
+                        egui::Button::new(
+                            egui::RichText::new(format!(
+                                "Set {} DNS",
+                                self.selected_provider.display_name()
+                            ))
+                            .color(egui::Color32::WHITE),
+                        )
+                        .fill(egui::Color32::from_rgb(34, 139, 34))
                         .corner_radius(10),
                     )
                     .clicked()
@@ -293,8 +291,12 @@ impl MyApp {
 
                 if ui
                     .add_sized(
-                        Vec2::new(140.0, 50.0),
-                        egui::Button::new("Clear DNS").corner_radius(10),
+                        Vec2::new(130.0, 50.0),
+                        egui::Button::new(
+                            egui::RichText::new("Clear DNS").color(egui::Color32::WHITE),
+                        )
+                        .fill(egui::Color32::from_rgb(178, 34, 34))
+                        .corner_radius(10),
                     )
                     .clicked()
                 {
@@ -302,28 +304,20 @@ impl MyApp {
                 }
             });
 
-            ui.add_space(5.0);
+            ui.add_space(15.0);
 
-            ui.vertical(|ui| {
-                if ui
+            // Test DNS button as a refresh sticker (icon only, with background)
+            ui.horizontal(|ui| {
+                ui.add_space(120.0);
+                let test_btn = ui
                     .add_sized(
-                        Vec2::new(140.0, 50.0),
-                        egui::Button::new("Refresh").corner_radius(10),
+                        Vec2::new(40.0, 40.0),
+                        egui::Button::new(egui::RichText::new("🔄").size(28.0)).frame(false),
                     )
-                    .clicked()
-                {
-                    self.handle_operation(DnsOperation::Refresh);
-                }
+                    .on_hover_text("Test DNS")
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
 
-                ui.add_space(10.0);
-
-                if ui
-                    .add_sized(
-                        Vec2::new(140.0, 50.0),
-                        egui::Button::new("Test DNS").corner_radius(10),
-                    )
-                    .clicked()
-                {
+                if test_btn.clicked() {
                     self.handle_operation(DnsOperation::Test);
                 }
             });
@@ -356,21 +350,6 @@ impl MyApp {
                 DnsOperation::Clear => {
                     if let Some(adapter) = &adapter_for_thread {
                         clear_dns_with_result(adapter)
-                    } else {
-                        OperationResult::Error("No Internet Connection Found".to_string())
-                    }
-                }
-                DnsOperation::Refresh => {
-                    if let Some(adapter) = &adapter_for_thread {
-                        let dns = get_current_dns(adapter);
-                        if dns.is_empty() {
-                            OperationResult::Warning("No DNS servers found".to_string())
-                        } else {
-                            OperationResult::Success(format!(
-                                "DNS status refreshed: {}",
-                                dns.join(", ")
-                            ))
-                        }
                     } else {
                         OperationResult::Error("No Internet Connection Found".to_string())
                     }
@@ -482,7 +461,7 @@ impl MyApp {
                             ui.add_space(20.0);
                             ui.label(
                                 egui::RichText::new(ping_text.clone())
-                                    .size(28.0) // change this number for desired size
+                                    .size(28.0)
                                     .color(ping_color),
                             );
                         });
@@ -492,9 +471,7 @@ impl MyApp {
         );
 
         self.show_second_window = keep_open.get();
-        // if the window closed, stop the ping thread and drop the receiver
         if !self.show_second_window {
-            // drop sender to stop background thread loop
             let _ = self.ping_sender.take();
             self.ping_receiver = None;
             self.ping_value = 0.0;
@@ -514,7 +491,7 @@ fn custom_window_frame(ctx: &egui::Context, title: &str, add_contents: impl FnOn
     CentralPanel::default().frame(panel_frame).show(ctx, |ui| {
         let app_rect = ui.max_rect();
 
-        let title_bar_height = 32.0;
+        let title_bar_height = 40.0;
         let title_bar_rect = {
             let mut rect = app_rect;
             rect.max.y = rect.min.y + title_bar_height;
@@ -559,6 +536,34 @@ fn title_bar_ui(ui: &mut egui::Ui, title_bar_rect: eframe::epaint::Rect, title: 
             title_bar_rect.right_bottom() + vec2(-1.0, 0.0),
         ],
         ui.visuals().widgets.noninteractive.bg_stroke,
+    );
+
+    // Left-side (top-left) controls: ping button
+    ui.scope_builder(
+        UiBuilder::new()
+            .max_rect(title_bar_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.visuals_mut().button_frame = false;
+            ui.add_space(6.0);
+
+            let button_height = 20.0;
+            let ping_btn = ui
+                .add(egui::Button::new(
+                    egui::RichText::new("📶").size(button_height),
+                ))
+                .on_hover_text("Ping Monitor")
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+
+            if ping_btn.clicked() {
+                // Signal the main update loop to start pinging and open the secondary window
+                PING_REQUEST.store(true, Ordering::SeqCst);
+            }
+
+            // keep remaining left-side space empty
+            ui.add_space(4.0);
+        },
     );
 
     if title_bar_response.drag_started_by(PointerButton::Primary) {

@@ -81,17 +81,17 @@ impl DnsProvider {
         }
     }
 
-    /// Get description for UI.
-    pub fn description(&self) -> &'static str {
-        match self {
-            DnsProvider::Electro { .. } => "Fast gaming DNS",
-            DnsProvider::Radar { .. } => "Fast gaming DNS",
-            DnsProvider::Shekan { .. } => "Fast gaming DNS",
-            DnsProvider::Bogzar { .. } => "Fast gaming DNS",
-            DnsProvider::Quad9 { .. } => "Security-focused",
-            DnsProvider::Custom { .. } => "User-defined servers",
-        }
-    }
+    // Get description for UI.
+    // pub fn description(&self) -> &'static str {
+    //     match self {
+    //         DnsProvider::Electro { .. } => "Fast gaming DNS",
+    //         DnsProvider::Radar { .. } => "Fast gaming DNS",
+    //         DnsProvider::Shekan { .. } => "Fast gaming DNS",
+    //         DnsProvider::Bogzar { .. } => "Fast gaming DNS",
+    //         DnsProvider::Quad9 { .. } => "Security-focused",
+    //         DnsProvider::Custom { .. } => "User-defined servers",
+    //     }
+    // }
 }
 
 /// Represents different DNS operations.
@@ -99,7 +99,6 @@ impl DnsProvider {
 pub enum DnsOperation {
     Set(DnsProvider),
     Clear,
-    Refresh,
     Test,
 }
 
