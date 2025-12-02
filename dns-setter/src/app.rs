@@ -464,6 +464,13 @@ impl MyApp {
                                     .size(28.0)
                                     .color(ping_color),
                             );
+
+                            ui.add_space(20.0);
+                            ui.horizontal(|ui| {
+                                for _ in 0..5 {
+                                    rtt_history(ui, &ping_text, ping_color);
+                                }
+                            })
                         });
                     });
                 }
@@ -611,4 +618,13 @@ fn get_ping() -> f64 {
         Ok(_) => start.elapsed().as_millis() as f64,
         Err(_) => 0.0, // return 0 on error
     }
+}
+
+fn rtt_history(ui: &mut egui::Ui, ping_text: &str, ping_color: egui::Color32) {
+    ui.label(
+        egui::RichText::new(ping_text.clone())
+            .size(10.0)
+            .color(ping_color),
+    );
+    ui.add_space(6.0);
 }
