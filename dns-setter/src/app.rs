@@ -1,6 +1,7 @@
 //! Application state, egui integration, and UI rendering.
 
 use ping;
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread;
@@ -27,8 +28,10 @@ pub struct MyApp {
     operation_receiver: Option<mpsc::Receiver<OperationResult>>,
     show_second_window: bool,
     ping_value: f64,
+    ping_history: VecDeque<f64>,
     ping_sender: Option<mpsc::Sender<f64>>,
     ping_receiver: Option<mpsc::Receiver<f64>>,
+    show_clear_confirmation: bool,
 }
 
 // When the title-bar ping button is clicked we set this flag.
@@ -42,6 +45,7 @@ impl MyApp {
             dns_state: DnsState::None,
             // don't create ping thread here — only when secondary window is opened
             ping_value: 0.0,
+            ping_history: VecDeque::with_capacity(5),
             ping_sender: None,
             ping_receiver: None,
             ..Default::default()
@@ -72,6 +76,11 @@ impl eframe::App for MyApp {
         if let Some(ping_rx) = &self.ping_receiver {
             if let Ok(ping) = ping_rx.try_recv() {
                 self.ping_value = ping;
+                // Add to history, keeping only last 5 values
+                self.ping_history.push_back(ping);
+                if self.ping_history.len() > 5 {
+                    self.ping_history.pop_front();
+                }
                 ctx.request_repaint();
             }
         }
@@ -125,7 +134,23 @@ impl eframe::App for MyApp {
                     self.render_action_buttons(ui);
                 });
 
-                ui.add_space(70.0);
+                ui.add_space(30.0);
+
+                // Load image - try with file:// prefix for local files
+                let image_uri = if let Ok(dir) = std::env::current_dir() {
+                    if let Some(path) = dir.join("asset").join("cat.webp").to_str() {
+                        // Use file:// URI format for local files
+                        format!("file:///{}", path.replace('\\', "/"))
+                    } else {
+                        "asset/cat.webp".to_string()
+                    }
+                } else {
+                    "asset/cat.webp".to_string()
+                };
+
+                ui.add(
+                    egui::Image::new(&image_uri).fit_to_exact_size(egui::Vec2::new(200.0, 200.0)),
+                );
             });
         });
 
@@ -136,39 +161,112 @@ impl eframe::App for MyApp {
                 self.ping_sender = Some(tx.clone());
                 self.ping_receiver = Some(rx);
 
-                thread::spawn(move || loop {
-                    let value = get_ping();
-                    if tx.send(value).is_err() {
-                        break;
+                thread::spawn(move || {
+                    loop {
+                        let value = get_ping();
+                        if tx.send(value).is_err() {
+                            break;
+                        }
+                        thread::sleep(Duration::from_secs(1));
                     }
-                    thread::sleep(Duration::from_secs(1));
                 });
             }
             self.show_second_window = true;
         }
 
         self.render_secondary_viewport(ctx);
+
+        // Show confirmation dialog for Clear DNS
+        if self.show_clear_confirmation {
+            egui::Window::new("Confirm Clear DNS")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label("Are you sure you want to clear the DNS configuration?");
+                    ui.label("This will reset DNS to DHCP/automatic.");
+                    ui.add_space(10.0);
+
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_sized(
+                                Vec2::new(80.0, 30.0),
+                                egui::Button::new(
+                                    egui::RichText::new("Cancel").color(egui::Color32::WHITE),
+                                )
+                                .fill(egui::Color32::from_rgb(178, 34, 34))
+                                .corner_radius(8),
+                            )
+                            .clicked()
+                        {
+                            self.show_clear_confirmation = false;
+                        }
+                        if ui
+                            .add_sized(
+                                Vec2::new(80.0, 30.0),
+                                egui::Button::new(
+                                    egui::RichText::new("Clear DNS").color(egui::Color32::WHITE),
+                                )
+                                .fill(egui::Color32::from_rgb(34, 139, 34))
+                                .corner_radius(8),
+                            )
+                            .clicked()
+                        {
+                            self.show_clear_confirmation = false;
+                            self.handle_operation(DnsOperation::Clear);
+                        }
+                    });
+                });
+        }
+
         ctx.request_repaint_after(Duration::from_millis(1000));
     }
 }
 
 impl MyApp {
-    fn render_ip_input(ui: &mut egui::Ui, octets: &mut [String; 4], label: &str) {
+    fn render_ip_input(ui: &mut egui::Ui, octets: &mut [String; 4], label: &str) -> bool {
+        let mut is_valid = true;
+        let mut next_focus_id: Option<egui::Id> = None;
+
         ui.horizontal(|ui| {
             ui.label(format!("{}: ", label));
 
             for (i, octet) in octets.iter_mut().enumerate() {
-                let response = ui.add_sized(
-                    Vec2::new(40.0, 20.0),
-                    egui::TextEdit::singleline(octet)
-                        .desired_width(40.0)
-                        .char_limit(3),
-                );
+                // Validate octet value (check before borrowing)
+                let octet_str = octet.clone();
+                let octet_num = octet_str.parse::<u8>().ok();
+                let is_octet_valid = octet_str.is_empty() || octet_num.is_some();
+                is_valid = is_valid && is_octet_valid;
+
+                let field_id = egui::Id::new((label, i));
+                let mut text_edit = egui::TextEdit::singleline(octet)
+                    .desired_width(40.0)
+                    .char_limit(3)
+                    .id(field_id);
+
+                // Add red text color if invalid
+                if !octet_str.is_empty() && !is_octet_valid {
+                    text_edit = text_edit.text_color(egui::Color32::RED);
+                }
+
+                let response = ui.add_sized(Vec2::new(40.0, 20.0), text_edit);
 
                 if response.changed() {
-                    *octet = octet.chars().filter(|c| c.is_ascii_digit()).collect();
+                    let old_len = octet.len();
+                    let filtered: String = octet.chars().filter(|c| c.is_ascii_digit()).collect();
+                    let new_len = filtered.len();
+                    *octet = filtered;
 
-                    if octet.len() == 3 && i < 3 {}
+                    // Auto-advance to next octet if exactly 3 digits entered
+                    // Check if we just reached 3 characters (was less than 3, now is 3)
+                    if new_len == 3 && old_len != 3 && i < 3 {
+                        let next_id = egui::Id::new((label, i + 1));
+                        next_focus_id = Some(next_id);
+                        // Request focus immediately
+                        ui.ctx().memory_mut(|mem| {
+                            mem.request_focus(next_id);
+                        });
+                    }
                 }
 
                 if i < 3 {
@@ -176,6 +274,23 @@ impl MyApp {
                 }
             }
         });
+
+        // Request focus for next field after all fields are rendered
+        if let Some(next_id) = next_focus_id {
+            ui.ctx().memory_mut(|mem| {
+                mem.request_focus(next_id);
+            });
+        }
+
+        // Show validation error message
+        if !is_valid {
+            ui.colored_label(
+                egui::Color32::RED,
+                "⚠️ Invalid IP address format (each octet must be 0-255)",
+            );
+        }
+
+        is_valid
     }
 
     fn render_status_section(&self, ui: &mut egui::Ui) {
@@ -187,6 +302,10 @@ impl MyApp {
                 let fallback = String::from("None");
                 let primary = servers.first().unwrap_or(&fallback);
                 ui.label(format!("Primary: {}", primary));
+                if servers.len() > 1 {
+                    let secondary = servers.get(1).unwrap_or(&fallback);
+                    ui.label(format!("Secondary: {}", secondary));
+                }
             }
             DnsState::Dhcp => {
                 ui.colored_label(egui::Color32::YELLOW, "🔄 DHCP DNS Configuration");
@@ -300,7 +419,7 @@ impl MyApp {
                     )
                     .clicked()
                 {
-                    self.handle_operation(DnsOperation::Clear);
+                    self.show_clear_confirmation = true;
                 }
             });
 
@@ -417,6 +536,7 @@ impl MyApp {
         // prepare values to move into the closure (avoid capturing &mut self)
         let ping_value = self.ping_value;
         let ping_text = format!("{} ms", ping_value);
+        let ping_history: Vec<f64> = self.ping_history.iter().copied().collect();
         // choose color by threshold: <100 green, 100-199 yellow, >=200 red, 0 = light gray (error/no response)
         let ping_color = if ping_value == 0.0 {
             egui::Color32::LIGHT_GRAY
@@ -429,7 +549,7 @@ impl MyApp {
         };
 
         let keep_open = std::cell::Cell::new(true);
-        let window_size = egui::vec2(200.0, 180.0);
+        let window_size = egui::vec2(230.0, 180.0);
         let screen_center = ctx.input(|i| {
             let info = i.viewport();
             info.outer_rect
@@ -467,8 +587,31 @@ impl MyApp {
 
                             ui.add_space(20.0);
                             ui.horizontal(|ui| {
-                                for _ in 0..5 {
-                                    rtt_history(ui, &ping_text, ping_color);
+                                ui.label("History: ");
+                                if ping_history.is_empty() {
+                                    ui.label(
+                                        egui::RichText::new("—")
+                                            .size(10.0)
+                                            .color(egui::Color32::GRAY),
+                                    );
+                                } else {
+                                    for &value in ping_history.iter().rev() {
+                                        let history_color = if value == 0.0 {
+                                            egui::Color32::LIGHT_GRAY
+                                        } else if value < 100.0 {
+                                            egui::Color32::GREEN
+                                        } else if value < 200.0 {
+                                            egui::Color32::YELLOW
+                                        } else {
+                                            egui::Color32::RED
+                                        };
+                                        ui.label(
+                                            egui::RichText::new(format!("{:.0}", value))
+                                                .size(12.0)
+                                                .color(history_color),
+                                        );
+                                        ui.add_space(6.0);
+                                    }
                                 }
                             })
                         });
@@ -482,6 +625,7 @@ impl MyApp {
             let _ = self.ping_sender.take();
             self.ping_receiver = None;
             self.ping_value = 0.0;
+            self.ping_history.clear();
         }
     }
 }
@@ -519,7 +663,7 @@ fn custom_window_frame(ctx: &egui::Context, title: &str, add_contents: impl FnOn
 }
 
 fn title_bar_ui(ui: &mut egui::Ui, title_bar_rect: eframe::epaint::Rect, title: &str) {
-    use egui::{vec2, Align2, FontId, Id, PointerButton, Sense, UiBuilder, ViewportCommand};
+    use egui::{Align2, FontId, Id, PointerButton, Sense, UiBuilder, ViewportCommand, vec2};
 
     let painter = ui.painter();
 
@@ -560,7 +704,7 @@ fn title_bar_ui(ui: &mut egui::Ui, title_bar_rect: eframe::epaint::Rect, title: 
                 .add(egui::Button::new(
                     egui::RichText::new("📶").size(button_height),
                 ))
-                .on_hover_text("Ping Monitor")
+                .on_hover_text("Ping Monitor (8.8.8.8)")
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
 
             if ping_btn.clicked() {
@@ -607,10 +751,15 @@ fn close_button(ui: &mut egui::Ui) {
 }
 
 fn get_ping() -> f64 {
-    let target_ip = "8.8.8.8".parse::<std::net::IpAddr>().expect("invalid IP");
+    // Parse IP address with proper error handling
+    let target_ip = match "8.8.8.8".parse::<std::net::IpAddr>() {
+        Ok(ip) => ip,
+        Err(_) => return 0.0, // Return 0 on parse error
+    };
 
     let mut p = ping::new(target_ip);
-    p.timeout(std::time::Duration::from_secs(2)).ttl(128);
+    // Reduced timeout from 2s to 1s for better responsiveness
+    p.timeout(Duration::from_secs(1)).ttl(128);
 
     let start = Instant::now();
 
@@ -618,13 +767,4 @@ fn get_ping() -> f64 {
         Ok(_) => start.elapsed().as_millis() as f64,
         Err(_) => 0.0, // return 0 on error
     }
-}
-
-fn rtt_history(ui: &mut egui::Ui, ping_text: &str, ping_color: egui::Color32) {
-    ui.label(
-        egui::RichText::new(ping_text.clone())
-            .size(10.0)
-            .color(ping_color),
-    );
-    ui.add_space(6.0);
 }
