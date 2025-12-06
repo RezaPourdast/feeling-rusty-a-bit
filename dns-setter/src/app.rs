@@ -14,6 +14,62 @@ use crate::system::{
     clear_dns_with_result, get_active_adapter, get_current_dns, set_dns_with_result,
 };
 
+// ============================================================================
+// UI CONSTANTS & THEME
+// ============================================================================
+
+/// UI spacing constants
+mod ui_constants {
+    pub const SPACING_SMALL: f32 = 10.0;
+    pub const SPACING_MEDIUM: f32 = 20.0;
+    pub const SPACING_LARGE: f32 = 30.0;
+    // pub const SPACING_XLARGE: f32 = 40.0;
+
+    pub const BUTTON_WIDTH: f32 = 130.0;
+    pub const BUTTON_HEIGHT: f32 = 50.0;
+    pub const BUTTON_SPACING: f32 = 10.0;
+
+    pub const TITLE_BAR_HEIGHT: f32 = 40.0;
+    pub const _WINDOW_PADDING: f32 = 4.0; // Reserved for future use
+}
+
+/// UI color constants
+mod ui_colors {
+    use eframe::egui::Color32;
+
+    pub const BUTTON_SUCCESS: Color32 = Color32::from_rgb(34, 139, 34); // Green
+    pub const BUTTON_DANGER: Color32 = Color32::from_rgb(178, 34, 34); // Red
+    pub const BUTTON_TEXT: Color32 = Color32::WHITE;
+
+    pub const STATUS_STATIC: Color32 = Color32::GREEN;
+    pub const STATUS_DHCP: Color32 = Color32::YELLOW;
+    pub const STATUS_NONE: Color32 = Color32::RED;
+
+    pub const SUCCESS: Color32 = Color32::GREEN;
+    pub const ERROR: Color32 = Color32::RED;
+    pub const WARNING: Color32 = Color32::YELLOW;
+}
+
+/// Configure UI theme and styling
+fn configure_theme(ctx: &egui::Context) {
+    use ui_constants::*;
+
+    let mut style = (*ctx.style()).clone();
+
+    // Configure spacing
+    style.spacing.item_spacing = egui::vec2(SPACING_SMALL, SPACING_SMALL);
+
+    // Configure visuals (optional - customize as needed)
+    // style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(45, 45, 48);
+    // style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(60, 60, 65);
+    // style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(70, 70, 75);
+
+    ctx.set_style(style);
+}
+
+// Track if theme has been configured
+static THEME_CONFIGURED: AtomicBool = AtomicBool::new(false);
+
 /// Main application container used by eframe.
 #[derive(Default)]
 pub struct MyApp {
@@ -32,6 +88,7 @@ pub struct MyApp {
     ping_sender: Option<mpsc::Sender<f64>>,
     ping_receiver: Option<mpsc::Receiver<f64>>,
     show_clear_confirmation: bool,
+    show_custom_dns_window: bool,
 }
 
 // When the title-bar ping button is clicked we set this flag.
@@ -61,6 +118,10 @@ impl eframe::App for MyApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Configure theme once on first update
+        if !THEME_CONFIGURED.swap(true, Ordering::SeqCst) {
+            configure_theme(ctx);
+        }
         if let Some(receiver) = &self.operation_receiver {
             if let Ok(result) = receiver.try_recv() {
                 self.handle_operation_result(result);
@@ -85,72 +146,58 @@ impl eframe::App for MyApp {
             }
         }
 
-        custom_window_frame(ctx, "🚀 DNS SETTER", |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space(20.0);
+        custom_window_frame(ctx, "", |ui| {
+            use ui_constants::*;
 
+            ui.vertical_centered(|ui| {
+                ui.add_space(SPACING_MEDIUM);
+
+                // Status Section
                 ui.group(|ui| {
                     self.render_status_section(ui);
                     self.render_app_state(ui);
                 });
 
-                ui.add_space(30.0);
+                ui.add_space(SPACING_LARGE);
 
-                ui.heading("🌐 Select DNS Provider");
-                ui.add_space(20.0);
+                // DNS List Section
+                ui.vertical_centered(|ui| {
+                    // Label above dropdown
+                    ui.label(egui::RichText::new("DNS List").color(egui::Color32::WHITE));
 
-                ui.horizontal(|ui| {
-                    ui.add_space(140.0);
-                    self.render_provider_selection(ui);
-                });
+                    ui.add_space(5.0);
 
-                if matches!(self.selected_provider, DnsProvider::Custom { .. }) {
-                    ui.add_space(20.0);
-                    ui.group(|ui| {
-                        ui.heading("📝 Custom DNS Settings");
-                        ui.add_space(10.0);
-
-                        Self::render_ip_input(ui, &mut self.custom_primary, "Primary DNS");
-
-                        ui.add_space(5.0);
-
-                        Self::render_ip_input(ui, &mut self.custom_secondary, "Secondary DNS");
-
-                        ui.add_space(10.0);
-
-                        if ui.button("Clear").clicked() {
-                            self.custom_primary =
-                                [String::new(), String::new(), String::new(), String::new()];
-                            self.custom_secondary =
-                                [String::new(), String::new(), String::new(), String::new()];
-                        }
+                    // Styled dropdown
+                    ui.horizontal(|ui| {
+                        ui.add_space(70.0);
+                        self.render_provider_selection(ui);
                     });
-                }
-
-                ui.add_space(40.0);
-
-                ui.horizontal(|ui| {
-                    ui.add_space(55.0);
-                    self.render_action_buttons(ui);
                 });
 
-                ui.add_space(30.0);
+                // Custom DNS window is opened separately when Custom is selected
 
-                // Load image - try with file:// prefix for local files
-                let image_uri = if let Ok(dir) = std::env::current_dir() {
-                    if let Some(path) = dir.join("asset").join("cat.webp").to_str() {
-                        // Use file:// URI format for local files
-                        format!("file:///{}", path.replace('\\', "/"))
-                    } else {
-                        "asset/cat.webp".to_string()
-                    }
-                } else {
-                    "asset/cat.webp".to_string()
-                };
+                ui.add_space(SPACING_MEDIUM);
 
-                ui.add(
-                    egui::Image::new(&image_uri).fit_to_exact_size(egui::Vec2::new(200.0, 200.0)),
-                );
+                // Action Buttons Section
+                self.render_action_buttons(ui);
+
+                ui.add_space(SPACING_MEDIUM);
+
+                // // Load image - try with file:// prefix for local files
+                // let image_uri = if let Ok(dir) = std::env::current_dir() {
+                //     if let Some(path) = dir.join("asset").join("cat.webp").to_str() {
+                //         // Use file:// URI format for local files
+                //         format!("file:///{}", path.replace('\\', "/"))
+                //     } else {
+                //         "asset/cat.webp".to_string()
+                //     }
+                // } else {
+                //     "asset/cat.webp".to_string()
+                // };
+
+                // ui.add(
+                //     egui::Image::new(&image_uri).fit_to_exact_size(egui::Vec2::new(200.0, 200.0)),
+                // );
             });
         });
 
@@ -175,6 +222,7 @@ impl eframe::App for MyApp {
         }
 
         self.render_secondary_viewport(ctx);
+        self.render_custom_dns_window(ctx);
 
         // Show confirmation dialog for Clear DNS
         if self.show_clear_confirmation {
@@ -294,11 +342,13 @@ impl MyApp {
     }
 
     fn render_status_section(&self, ui: &mut egui::Ui) {
+        use ui_colors::{STATUS_DHCP, STATUS_NONE, STATUS_STATIC};
+
         ui.heading("📊 Current Status");
 
         match &self.dns_state {
             DnsState::Static(servers) => {
-                ui.colored_label(egui::Color32::GREEN, "🔒 Static DNS Configuration");
+                ui.colored_label(STATUS_STATIC, "🔒 Static DNS Configuration");
                 let fallback = String::from("None");
                 let primary = servers.first().unwrap_or(&fallback);
                 ui.label(format!("Primary: {}", primary));
@@ -308,10 +358,10 @@ impl MyApp {
                 }
             }
             DnsState::Dhcp => {
-                ui.colored_label(egui::Color32::YELLOW, "🔄 DHCP DNS Configuration");
+                ui.colored_label(STATUS_DHCP, "🔄 DHCP DNS Configuration");
             }
             DnsState::None => {
-                ui.colored_label(egui::Color32::RED, "❌ No DNS Configuration");
+                ui.colored_label(STATUS_NONE, "❌ No DNS Configuration");
             }
         }
     }
@@ -339,21 +389,38 @@ impl MyApp {
             })
             .unwrap_or(0);
 
-        egui::ComboBox::from_id_salt("dns_provider")
-            .selected_text(providers[current_index].0)
-            .show_ui(ui, |ui| {
-                for (name, provider) in providers {
-                    let was_selected = matches!(
-                        (name, &self.selected_provider),
-                        ("Custom", DnsProvider::Custom { .. })
-                    ) || std::mem::discriminant(&provider)
-                        == std::mem::discriminant(&self.selected_provider);
+        // Center the combobox
+        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+            ui.set_max_width(ui.available_width());
+            egui::ComboBox::from_id_salt("dns_provider")
+                .selected_text(
+                    egui::RichText::new(providers[current_index].0).color(egui::Color32::WHITE),
+                )
+                .show_ui(ui, |ui| {
+                    // Style the dropdown menu
+                    ui.style_mut().visuals.override_text_color = Some(egui::Color32::WHITE);
 
-                    if ui.selectable_label(was_selected, name).clicked() {
-                        self.selected_provider = provider;
+                    for (name, provider) in providers {
+                        let was_selected = matches!(
+                            (name, &self.selected_provider),
+                            ("Custom", DnsProvider::Custom { .. })
+                        ) || std::mem::discriminant(&provider)
+                            == std::mem::discriminant(&self.selected_provider);
+
+                        if ui.selectable_label(was_selected, name).clicked() {
+                            let is_custom = matches!(provider, DnsProvider::Custom { .. });
+                            self.selected_provider = provider;
+                            // Open custom DNS window when Custom is selected
+                            if is_custom {
+                                self.show_custom_dns_window = true;
+                            } else {
+                                // Close custom DNS window when switching away from Custom
+                                self.show_custom_dns_window = false;
+                            }
+                        }
                     }
-                }
-            });
+                });
+        });
 
         if matches!(self.selected_provider, DnsProvider::Custom { .. }) {
             self.selected_provider = DnsProvider::custom(
@@ -364,6 +431,8 @@ impl MyApp {
     }
 
     fn render_app_state(&self, ui: &mut egui::Ui) {
+        use ui_colors::{ERROR, SUCCESS, WARNING};
+
         match &self.app_state {
             AppState::Idle => {}
             AppState::Processing => {
@@ -373,61 +442,60 @@ impl MyApp {
                 });
             }
             AppState::Success(message) => {
-                ui.colored_label(egui::Color32::GREEN, format!("✅ {}", message));
+                ui.colored_label(SUCCESS, format!("✅ {}", message));
             }
             AppState::Error(message) => {
-                ui.colored_label(egui::Color32::RED, format!("❌ {}", message));
+                ui.colored_label(ERROR, format!("❌ {}", message));
             }
             AppState::Warning(message) => {
-                ui.colored_label(egui::Color32::YELLOW, format!("⚠️ {}", message));
+                ui.colored_label(WARNING, format!("⚠️ {}", message));
             }
         }
     }
 
     fn render_action_buttons(&mut self, ui: &mut egui::Ui) {
-        ui.vertical(|ui| {
-            // Set DNS and Clear DNS side-by-side
-            ui.horizontal(|ui| {
-                if ui
-                    .add_sized(
-                        Vec2::new(130.0, 50.0),
-                        egui::Button::new(
-                            egui::RichText::new(format!(
-                                "Set {} DNS",
-                                self.selected_provider.display_name()
-                            ))
-                            .color(egui::Color32::WHITE),
-                        )
-                        .fill(egui::Color32::from_rgb(34, 139, 34))
-                        .corner_radius(10),
+        use ui_colors::{BUTTON_DANGER, BUTTON_SUCCESS, BUTTON_TEXT};
+        use ui_constants::{BUTTON_HEIGHT, BUTTON_SPACING, BUTTON_WIDTH};
+
+        ui.vertical_centered(|ui| {
+            // Set DNS button (first)
+            if ui
+                .add_sized(
+                    Vec2::new(BUTTON_WIDTH, BUTTON_HEIGHT),
+                    egui::Button::new(
+                        egui::RichText::new(format!(
+                            "Set {} DNS",
+                            self.selected_provider.display_name()
+                        ))
+                        .color(BUTTON_TEXT),
                     )
-                    .clicked()
-                {
-                    self.handle_operation(DnsOperation::Set(self.selected_provider.clone()));
-                }
+                    .fill(BUTTON_SUCCESS)
+                    .corner_radius(10),
+                )
+                .clicked()
+            {
+                self.handle_operation(DnsOperation::Set(self.selected_provider.clone()));
+            }
 
-                ui.add_space(10.0);
+            ui.add_space(BUTTON_SPACING);
 
-                if ui
-                    .add_sized(
-                        Vec2::new(130.0, 50.0),
-                        egui::Button::new(
-                            egui::RichText::new("Clear DNS").color(egui::Color32::WHITE),
-                        )
-                        .fill(egui::Color32::from_rgb(178, 34, 34))
+            // Clear DNS button (below Set DNS)
+            if ui
+                .add_sized(
+                    Vec2::new(BUTTON_WIDTH, BUTTON_HEIGHT),
+                    egui::Button::new(egui::RichText::new("Clear DNS").color(BUTTON_TEXT))
+                        .fill(BUTTON_DANGER)
                         .corner_radius(10),
-                    )
-                    .clicked()
-                {
-                    self.show_clear_confirmation = true;
-                }
-            });
+                )
+                .clicked()
+            {
+                self.show_clear_confirmation = true;
+            }
 
-            ui.add_space(15.0);
+            // Test DNS button (centered)
+            ui.horizontal_centered(|ui| {
+                ui.add_space(100.0);
 
-            // Test DNS button as a refresh sticker (icon only, with background)
-            ui.horizontal(|ui| {
-                ui.add_space(120.0);
                 let test_btn = ui
                     .add_sized(
                         Vec2::new(40.0, 40.0),
@@ -628,6 +696,94 @@ impl MyApp {
             self.ping_history.clear();
         }
     }
+
+    fn render_custom_dns_window(&mut self, ctx: &egui::Context) {
+        if !self.show_custom_dns_window {
+            return;
+        }
+
+        use ui_constants::*;
+
+        let keep_open = std::cell::Cell::new(true);
+        let window_size = egui::vec2(350.0, 220.0);
+        let screen_center = ctx.input(|i| {
+            let info = i.viewport();
+            info.outer_rect
+                .or(info.inner_rect)
+                .map(|rect| rect.center())
+                .unwrap_or_else(|| egui::pos2(0.0, 0.0))
+        });
+        let position = screen_center - window_size / 2.0;
+        let viewport_id = egui::ViewportId::from_hash_of("custom_dns");
+
+        ctx.show_viewport_immediate(
+            viewport_id,
+            egui::ViewportBuilder::default()
+                .with_title("Custom DNS Settings")
+                .with_inner_size(window_size)
+                .with_position(position)
+                .with_resizable(false)
+                .with_decorations(true),
+            {
+                let keep_open = &keep_open;
+                let custom_primary = &mut self.custom_primary;
+                let custom_secondary = &mut self.custom_secondary;
+
+                move |ctx, _class| {
+                    if ctx.input(|i| i.viewport().close_requested()) {
+                        keep_open.set(false);
+                    }
+
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(SPACING_MEDIUM);
+                            ui.heading("📝 Custom DNS Settings");
+                            ui.add_space(SPACING_SMALL);
+
+                            Self::render_ip_input(ui, custom_primary, "Primary DNS");
+                            ui.add_space(5.0);
+                            Self::render_ip_input(ui, custom_secondary, "Secondary DNS");
+
+                            ui.add_space(SPACING_SMALL);
+
+                            ui.horizontal(|ui| {
+                                if ui.button("Clear").clicked() {
+                                    *custom_primary = [
+                                        String::new(),
+                                        String::new(),
+                                        String::new(),
+                                        String::new(),
+                                    ];
+                                    *custom_secondary = [
+                                        String::new(),
+                                        String::new(),
+                                        String::new(),
+                                        String::new(),
+                                    ];
+                                }
+
+                                ui.add_space(SPACING_SMALL);
+
+                                if ui.button("Close").clicked() {
+                                    keep_open.set(false);
+                                }
+                            });
+                        });
+                    });
+                }
+            },
+        );
+
+        self.show_custom_dns_window = keep_open.get();
+
+        // Update provider when Custom is selected (sync IPs in real-time)
+        if matches!(self.selected_provider, DnsProvider::Custom { .. }) {
+            self.selected_provider = DnsProvider::custom(
+                Self::octets_to_ip(&self.custom_primary),
+                Self::octets_to_ip(&self.custom_secondary),
+            );
+        }
+    }
 }
 
 fn custom_window_frame(ctx: &egui::Context, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
@@ -636,13 +792,13 @@ fn custom_window_frame(ctx: &egui::Context, title: &str, add_contents: impl FnOn
     let panel_frame = egui::Frame::new()
         .fill(ctx.style().visuals.window_fill())
         .corner_radius(10)
-        .stroke(ctx.style().visuals.widgets.noninteractive.fg_stroke)
         .outer_margin(1);
 
     CentralPanel::default().frame(panel_frame).show(ctx, |ui| {
         let app_rect = ui.max_rect();
 
-        let title_bar_height = 40.0;
+        use ui_constants::TITLE_BAR_HEIGHT;
+        let title_bar_height = TITLE_BAR_HEIGHT;
         let title_bar_rect = {
             let mut rect = app_rect;
             rect.max.y = rect.min.y + title_bar_height;
@@ -662,8 +818,8 @@ fn custom_window_frame(ctx: &egui::Context, title: &str, add_contents: impl FnOn
     });
 }
 
-fn title_bar_ui(ui: &mut egui::Ui, title_bar_rect: eframe::epaint::Rect, title: &str) {
-    use egui::{Align2, FontId, Id, PointerButton, Sense, UiBuilder, ViewportCommand, vec2};
+fn title_bar_ui(ui: &mut egui::Ui, title_bar_rect: eframe::epaint::Rect, _title: &str) {
+    use egui::{Id, PointerButton, Sense, UiBuilder, ViewportCommand, vec2};
 
     let painter = ui.painter();
 
@@ -671,14 +827,6 @@ fn title_bar_ui(ui: &mut egui::Ui, title_bar_rect: eframe::epaint::Rect, title: 
         title_bar_rect,
         Id::new("title_bar"),
         Sense::click_and_drag(),
-    );
-
-    painter.text(
-        title_bar_rect.center(),
-        Align2::CENTER_CENTER,
-        title,
-        FontId::proportional(20.0),
-        ui.style().visuals.text_color(),
     );
 
     painter.line_segment(
@@ -730,8 +878,26 @@ fn title_bar_ui(ui: &mut egui::Ui, title_bar_rect: eframe::epaint::Rect, title: 
             ui.visuals_mut().button_frame = false;
             ui.add_space(8.0);
             close_button(ui);
+            ui.add_space(6.0);
+            minimize_button(ui);
         },
     );
+}
+
+/// Show a minimize button for the native window.
+fn minimize_button(ui: &mut egui::Ui) {
+    use egui::{Button, RichText, ViewportCommand};
+
+    let button_height = 20.0;
+
+    let minimize_resp = ui
+        .add(Button::new(RichText::new("➖").size(button_height)))
+        .on_hover_text("Minimize the window")
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+
+    if minimize_resp.clicked() {
+        ui.ctx().send_viewport_cmd(ViewportCommand::Minimized(true));
+    }
 }
 
 /// Show a close button for the native window.
