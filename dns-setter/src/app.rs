@@ -7,7 +7,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use eframe::egui::{self, Vec2};
+use eframe::egui::{self, ColorImage, TextureHandle, Vec2};
+use image;
 
 use crate::domain::{AppState, DnsOperation, DnsProvider, DnsState, OperationResult};
 use crate::system::{
@@ -22,12 +23,12 @@ use crate::system::{
 mod ui_constants {
     pub const SPACING_SMALL: f32 = 10.0;
     pub const SPACING_MEDIUM: f32 = 20.0;
-    pub const SPACING_LARGE: f32 = 30.0;
-    // pub const SPACING_XLARGE: f32 = 40.0;
+    pub const _SPACING_LARGE: f32 = 30.0;
+    pub const _SPACING_XLARGE: f32 = 40.0;
 
-    pub const BUTTON_WIDTH: f32 = 130.0;
-    pub const BUTTON_HEIGHT: f32 = 50.0;
-    pub const BUTTON_SPACING: f32 = 10.0;
+    pub const BUTTON_WIDTH: f32 = 200.0;
+    pub const BUTTON_HEIGHT: f32 = 40.0;
+    pub const BUTTON_SPACING: f32 = 3.0;
 
     pub const TITLE_BAR_HEIGHT: f32 = 40.0;
     pub const _WINDOW_PADDING: f32 = 4.0; // Reserved for future use
@@ -37,8 +38,8 @@ mod ui_constants {
 mod ui_colors {
     use eframe::egui::Color32;
 
-    pub const BUTTON_SUCCESS: Color32 = Color32::from_rgb(34, 139, 34); // Green
-    pub const BUTTON_DANGER: Color32 = Color32::from_rgb(178, 34, 34); // Red
+    pub const BUTTON_SUCCESS: Color32 = Color32::from_rgb(60, 140, 64); // Darker #4CAF50
+    pub const BUTTON_DANGER: Color32 = Color32::from_rgb(183, 46, 42); // Darker #E53935
     pub const BUTTON_TEXT: Color32 = Color32::WHITE;
 
     pub const STATUS_STATIC: Color32 = Color32::GREEN;
@@ -89,6 +90,8 @@ pub struct MyApp {
     ping_receiver: Option<mpsc::Receiver<f64>>,
     show_clear_confirmation: bool,
     show_custom_dns_window: bool,
+    background_texture: Option<TextureHandle>,
+    social_logos: std::collections::HashMap<String, TextureHandle>,
 }
 
 // When the title-bar ping button is clicked we set this flag.
@@ -105,10 +108,146 @@ impl MyApp {
             ping_history: VecDeque::with_capacity(5),
             ping_sender: None,
             ping_receiver: None,
+            background_texture: None,
+            social_logos: std::collections::HashMap::new(),
             ..Default::default()
         };
 
         app
+    }
+
+    fn load_background_image(&mut self, ctx: &egui::Context) {
+        // Try to load background image from asset folder
+        let image_path = if let Ok(dir) = std::env::current_dir() {
+            dir.join("asset").join("background.png")
+        } else {
+            std::path::PathBuf::from("asset/background.png")
+        };
+
+        // Try PNG first, then JPG, then WEBP
+        let paths = vec![
+            image_path.clone(),
+            image_path.with_extension("jpg"),
+            image_path.with_extension("jpeg"),
+            image_path.with_extension("webp"),
+        ];
+
+        for path in paths {
+            if path.exists() {
+                // Load image using image crate
+                if let Ok(img) = image::open(&path) {
+                    let rgba = img.to_rgba8();
+                    let size = [rgba.width() as usize, rgba.height() as usize];
+                    let pixels = rgba.as_flat_samples();
+                    let color_image = ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+                    let texture =
+                        ctx.load_texture("background", color_image, egui::TextureOptions::LINEAR);
+                    self.background_texture = Some(texture);
+                    break;
+                }
+            }
+        }
+    }
+
+    fn load_social_logos(&mut self, ctx: &egui::Context) {
+        // Load the three logos: cup-of-drink, email, github
+        let logo_files = vec![
+            ("cup-of-drink", "cup-of-drink.png"),
+            ("email", "email.png"),
+            ("github", "github.png"),
+        ];
+
+        for (name, filename) in logo_files {
+            let image_path = if let Ok(dir) = std::env::current_dir() {
+                dir.join("asset").join(filename)
+            } else {
+                std::path::PathBuf::from(format!("asset/{}", filename))
+            };
+
+            // Try multiple formats
+            let paths = vec![
+                image_path.clone(),
+                image_path.with_extension("jpg"),
+                image_path.with_extension("jpeg"),
+                image_path.with_extension("webp"),
+            ];
+
+            for path in paths {
+                if path.exists() {
+                    if let Ok(img) = image::open(&path) {
+                        let rgba = img.to_rgba8();
+                        let size = [rgba.width() as usize, rgba.height() as usize];
+                        let pixels = rgba.as_flat_samples();
+                        let color_image =
+                            ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+                        let texture = ctx.load_texture(
+                            format!("logo_{}", name),
+                            color_image,
+                            egui::TextureOptions::LINEAR,
+                        );
+                        self.social_logos.insert(name.to_string(), texture);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    fn render_footer(&mut self, ui: &mut egui::Ui) {
+        // Just the clickable logo links (no footer bar) - horizontal layout
+        let icon_size = 28.0;
+        let icon_spacing = 15.0;
+        let light_gray = egui::Color32::from_rgb(180, 180, 180); // Light gray color
+
+        ui.vertical(|ui| {
+            ui.add_space(40.0);
+            ui.horizontal(|ui| {
+                ui.add_space(52.5);
+                // Define logos with their URLs
+                let logos = vec![
+                    ("cup-of-drink", "https://www.coffeete.ir/rezapourdast"),
+                    ("email", "mailto:s.rezapourdast@gmail.com"),
+                    ("github", "https://github.com/RezaPourdast"),
+                ];
+
+                for (logo_name, url) in logos {
+                    if let Some(texture) = self.social_logos.get(logo_name) {
+                        // Create clickable area for the logo
+                        let (rect, response) = ui.allocate_exact_size(
+                            Vec2::new(icon_size, icon_size),
+                            egui::Sense::click(),
+                        );
+
+                        // Draw the image with light gray tint
+                        let painter = ui.painter();
+                        painter.image(
+                            texture.id(),
+                            rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            light_gray,
+                        );
+
+                        // Check for click first
+                        if response.clicked() {
+                            // Open URL
+                            let _ = open::that(url);
+                        }
+
+                        // Add hover effect
+                        if response.hovered() {
+                            painter.rect_filled(
+                                rect,
+                                0.0,
+                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30),
+                            );
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+
+                        ui.add_space(icon_spacing);
+                    }
+                }
+            });
+        });
     }
 }
 
@@ -121,6 +260,23 @@ impl eframe::App for MyApp {
         // Configure theme once on first update
         if !THEME_CONFIGURED.swap(true, Ordering::SeqCst) {
             configure_theme(ctx);
+        }
+
+        // Load background image on first update
+        if self.background_texture.is_none() {
+            self.load_background_image(ctx);
+        }
+
+        // Load social logos on first update
+        if self.social_logos.is_empty() {
+            self.load_social_logos(ctx);
+        }
+
+        // Store background texture in context for custom_window_frame to access
+        if let Some(ref texture) = self.background_texture {
+            ctx.data_mut(|d| {
+                d.insert_temp(egui::Id::new("background_texture"), Some(texture.clone()));
+            });
         }
         if let Some(receiver) = &self.operation_receiver {
             if let Ok(result) = receiver.try_recv() {
@@ -149,56 +305,59 @@ impl eframe::App for MyApp {
         custom_window_frame(ctx, "", |ui| {
             use ui_constants::*;
 
-            ui.vertical_centered(|ui| {
-                ui.add_space(SPACING_MEDIUM);
-
-                // Status Section
-                ui.group(|ui| {
-                    self.render_status_section(ui);
-                    self.render_app_state(ui);
-                });
-
-                ui.add_space(SPACING_LARGE);
-
-                // DNS List Section
-                ui.vertical_centered(|ui| {
-                    // Label above dropdown
-                    ui.label(egui::RichText::new("DNS List").color(egui::Color32::WHITE));
-
-                    ui.add_space(5.0);
-
-                    // Styled dropdown
-                    ui.horizontal(|ui| {
-                        ui.add_space(70.0);
-                        self.render_provider_selection(ui);
+            // Status Section - wrapped in a card with fixed width, rounded corners, and transparent blur effect
+            ui.horizontal(|ui| {
+                ui.set_max_width(230.0);
+                ui.set_max_height(165.0);
+                // Custom frame with transparent background and rounded corners
+                // Using semi-transparent dark color for blur/frosted glass effect
+                let frame = egui::Frame::group(ui.style())
+                    .fill(egui::Color32::from_rgba_unmultiplied(60, 60, 65, 45)) // Lighter gray with higher opacity for blurry effect
+                    .corner_radius(12.0); // Increased corner radius
+                frame.show(ui, |ui| {
+                    ui.set_width(225.0);
+                    ui.set_height(165.0);
+                    ui.add_space(12.0);
+                    ui.vertical(|ui| {
+                        ui.add_space(12.0);
+                        self.render_status_section(ui);
+                        self.render_app_state(ui);
                     });
                 });
-
-                // Custom DNS window is opened separately when Custom is selected
-
-                ui.add_space(SPACING_MEDIUM);
-
-                // Action Buttons Section
-                self.render_action_buttons(ui);
-
-                ui.add_space(SPACING_MEDIUM);
-
-                // // Load image - try with file:// prefix for local files
-                // let image_uri = if let Ok(dir) = std::env::current_dir() {
-                //     if let Some(path) = dir.join("asset").join("cat.webp").to_str() {
-                //         // Use file:// URI format for local files
-                //         format!("file:///{}", path.replace('\\', "/"))
-                //     } else {
-                //         "asset/cat.webp".to_string()
-                //     }
-                // } else {
-                //     "asset/cat.webp".to_string()
-                // };
-
-                // ui.add(
-                //     egui::Image::new(&image_uri).fit_to_exact_size(egui::Vec2::new(200.0, 200.0)),
-                // );
             });
+
+            // DNS List Section - same transparent frame style without max height
+            ui.horizontal(|ui| {
+                ui.set_max_width(230.0);
+                // Custom frame with transparent background and rounded corners (same as status section)
+                let frame = egui::Frame::group(ui.style())
+                    .fill(egui::Color32::from_rgba_unmultiplied(60, 60, 65, 45)) // Lighter gray with higher opacity for blurry effect
+                    .corner_radius(12.0); // Same rounded corners
+                frame.show(ui, |ui| {
+                    ui.set_width(225.0);
+                    // No max height constraint - let it grow with content
+                    ui.vertical(|ui| {
+                        ui.add_space(12.0);
+                        // Label above dropdown
+                        ui.horizontal(|ui| {
+                            ui.add_space(13.0);
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    egui::RichText::new("DNS List")
+                                        .color(egui::Color32::WHITE)
+                                        .size(18.0), // Larger font size
+                                );
+                                self.render_provider_selection(ui);
+                            });
+                        });
+                        ui.add_space(BUTTON_SPACING);
+                        self.render_action_buttons(ui);
+                    });
+                });
+            });
+
+            // Footer with clickable logo links
+            self.render_footer(ui);
         });
 
         // If the title-bar ping button was clicked, start the ping thread / open the window.
@@ -341,20 +500,47 @@ impl MyApp {
         is_valid
     }
 
-    fn render_status_section(&self, ui: &mut egui::Ui) {
+    fn render_status_section(&mut self, ui: &mut egui::Ui) {
         use ui_colors::{STATUS_DHCP, STATUS_NONE, STATUS_STATIC};
 
-        ui.heading("📊 Current Status");
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Current Status")
+                        .color(egui::Color32::WHITE)
+                        .size(18.0),
+                );
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add_space(10.0);
+                    let test_btn = ui
+                        .add_sized(
+                            Vec2::new(22.0, 22.0), // Smaller button size
+                            egui::Button::new(egui::RichText::new("🔄").size(16.0)).frame(false),
+                        )
+                        .on_hover_text("Test DNS")
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if test_btn.clicked() {
+                        self.handle_operation(DnsOperation::Test);
+                    }
+                });
+            });
+        });
 
         match &self.dns_state {
             DnsState::Static(servers) => {
-                ui.colored_label(STATUS_STATIC, "🔒 Static DNS Configuration");
+                ui.colored_label(STATUS_STATIC, "Static DNS Configuration 🔒");
                 let fallback = String::from("None");
                 let primary = servers.first().unwrap_or(&fallback);
-                ui.label(format!("Primary: {}", primary));
+                ui.label(
+                    egui::RichText::new(format!("Primary: {}", primary))
+                        .color(egui::Color32::WHITE),
+                );
                 if servers.len() > 1 {
                     let secondary = servers.get(1).unwrap_or(&fallback);
-                    ui.label(format!("Secondary: {}", secondary));
+                    ui.label(
+                        egui::RichText::new(format!("Secondary: {}", secondary))
+                            .color(egui::Color32::WHITE),
+                    );
                 }
             }
             DnsState::Dhcp => {
@@ -389,13 +575,61 @@ impl MyApp {
             })
             .unwrap_or(0);
 
-        // Center the combobox
+        // Center the combobox with button size, transparent background, and rounded corners
+        use ui_constants::{BUTTON_HEIGHT, BUTTON_WIDTH};
         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-            ui.set_max_width(ui.available_width());
+            // Store original styles
+            let original_padding = ui.style().spacing.button_padding;
+            let original_bg_fill = ui.style().visuals.widgets.inactive.bg_fill;
+            let original_corner_radius = ui.style().visuals.widgets.inactive.corner_radius;
+
+            // Calculate padding to achieve button height
+            let text_size = ui.style().text_styles[&egui::TextStyle::Body].size;
+            let vertical_padding = ((BUTTON_HEIGHT / 2.0 + 5.0) - text_size) / 2.0;
+            ui.style_mut().spacing.button_padding = egui::vec2(8.0, vertical_padding.max(0.0));
+
+            // Make combobox semi-transparent with rounded corners like buttons
+            // Set all widget states to have slight background opacity with darker gray
+            let bg_opacity = 45; // Semi-transparent background
+            let dark_gray = 255; // Dark gray color (60, 60, 60)
+            ui.style_mut().visuals.widgets.inactive.bg_fill =
+                egui::Color32::from_rgba_unmultiplied(dark_gray, dark_gray, dark_gray, bg_opacity);
+            ui.style_mut().visuals.widgets.inactive.weak_bg_fill =
+                egui::Color32::from_rgba_unmultiplied(dark_gray, dark_gray, dark_gray, bg_opacity);
+            ui.style_mut().visuals.widgets.hovered.bg_fill =
+                egui::Color32::from_rgba_unmultiplied(dark_gray, dark_gray, dark_gray, 80); // Slightly more opaque on hover
+            ui.style_mut().visuals.widgets.hovered.weak_bg_fill =
+                egui::Color32::from_rgba_unmultiplied(dark_gray, dark_gray, dark_gray, 80);
+            ui.style_mut().visuals.widgets.active.bg_fill =
+                egui::Color32::from_rgba_unmultiplied(dark_gray, dark_gray, dark_gray, bg_opacity);
+            ui.style_mut().visuals.widgets.active.weak_bg_fill =
+                egui::Color32::from_rgba_unmultiplied(dark_gray, dark_gray, dark_gray, bg_opacity);
+            ui.style_mut().visuals.widgets.noninteractive.bg_fill =
+                egui::Color32::from_rgba_unmultiplied(dark_gray, dark_gray, dark_gray, bg_opacity);
+            ui.style_mut().visuals.widgets.noninteractive.weak_bg_fill =
+                egui::Color32::from_rgba_unmultiplied(dark_gray, dark_gray, dark_gray, bg_opacity);
+            ui.style_mut().visuals.widgets.open.bg_fill =
+                egui::Color32::from_rgba_unmultiplied(dark_gray, dark_gray, dark_gray, bg_opacity);
+            ui.style_mut().visuals.widgets.open.weak_bg_fill =
+                egui::Color32::from_rgba_unmultiplied(dark_gray, dark_gray, dark_gray, bg_opacity);
+
+            let corner_radius = egui::CornerRadius {
+                nw: 6,
+                ne: 6,
+                sw: 6,
+                se: 6,
+            };
+            ui.style_mut().visuals.widgets.inactive.corner_radius = corner_radius; // Match button corner radius
+            ui.style_mut().visuals.widgets.hovered.corner_radius = corner_radius;
+            ui.style_mut().visuals.widgets.active.corner_radius = corner_radius;
+            ui.style_mut().visuals.widgets.noninteractive.corner_radius = corner_radius;
+            ui.style_mut().visuals.widgets.open.corner_radius = corner_radius;
+
             egui::ComboBox::from_id_salt("dns_provider")
                 .selected_text(
                     egui::RichText::new(providers[current_index].0).color(egui::Color32::WHITE),
                 )
+                .width(BUTTON_WIDTH)
                 .show_ui(ui, |ui| {
                     // Style the dropdown menu
                     ui.style_mut().visuals.override_text_color = Some(egui::Color32::WHITE);
@@ -420,6 +654,11 @@ impl MyApp {
                         }
                     }
                 });
+
+            // Restore original styles
+            ui.style_mut().spacing.button_padding = original_padding;
+            ui.style_mut().visuals.widgets.inactive.bg_fill = original_bg_fill;
+            ui.style_mut().visuals.widgets.inactive.corner_radius = original_corner_radius;
         });
 
         if matches!(self.selected_provider, DnsProvider::Custom { .. }) {
@@ -467,10 +706,12 @@ impl MyApp {
                             "Set {} DNS",
                             self.selected_provider.display_name()
                         ))
-                        .color(BUTTON_TEXT),
+                        .color(BUTTON_TEXT)
+                        .strong() // Make text bold
+                        .size(14.0), // Larger font size
                     )
                     .fill(BUTTON_SUCCESS)
-                    .corner_radius(10),
+                    .corner_radius(6),
                 )
                 .clicked()
             {
@@ -483,31 +724,19 @@ impl MyApp {
             if ui
                 .add_sized(
                     Vec2::new(BUTTON_WIDTH, BUTTON_HEIGHT),
-                    egui::Button::new(egui::RichText::new("Clear DNS").color(BUTTON_TEXT))
-                        .fill(BUTTON_DANGER)
-                        .corner_radius(10),
+                    egui::Button::new(
+                        egui::RichText::new("Clear DNS")
+                            .color(BUTTON_TEXT)
+                            .strong() // Make text bold
+                            .size(14.0), // Larger font size
+                    )
+                    .fill(BUTTON_DANGER)
+                    .corner_radius(6),
                 )
                 .clicked()
             {
                 self.show_clear_confirmation = true;
             }
-
-            // Test DNS button (centered)
-            ui.horizontal_centered(|ui| {
-                ui.add_space(100.0);
-
-                let test_btn = ui
-                    .add_sized(
-                        Vec2::new(40.0, 40.0),
-                        egui::Button::new(egui::RichText::new("🔄").size(28.0)).frame(false),
-                    )
-                    .on_hover_text("Test DNS")
-                    .on_hover_cursor(egui::CursorIcon::PointingHand);
-
-                if test_btn.clicked() {
-                    self.handle_operation(DnsOperation::Test);
-                }
-            });
         });
     }
 
@@ -797,6 +1026,25 @@ fn custom_window_frame(ctx: &egui::Context, title: &str, add_contents: impl FnOn
     CentralPanel::default().frame(panel_frame).show(ctx, |ui| {
         let app_rect = ui.max_rect();
 
+        // Draw background image with low opacity if available
+        // Get texture from app data
+        if let Some(texture) =
+            ctx.data(|d| d.get_temp::<Option<TextureHandle>>(egui::Id::new("background_texture")))
+        {
+            if let Some(ref tex) = texture {
+                let painter = ui.painter();
+                // Increased opacity for more visible background (0.3 = 30% opacity)
+                let tint =
+                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, (255.0 * 0.3) as u8);
+                painter.image(
+                    tex.id(),
+                    app_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    tint,
+                );
+            }
+        }
+
         use ui_constants::TITLE_BAR_HEIGHT;
         let title_bar_height = TITLE_BAR_HEIGHT;
         let title_bar_rect = {
@@ -819,9 +1067,7 @@ fn custom_window_frame(ctx: &egui::Context, title: &str, add_contents: impl FnOn
 }
 
 fn title_bar_ui(ui: &mut egui::Ui, title_bar_rect: eframe::epaint::Rect, _title: &str) {
-    use egui::{Id, PointerButton, Sense, UiBuilder, ViewportCommand, vec2};
-
-    let painter = ui.painter();
+    use egui::{Id, PointerButton, Sense, UiBuilder, ViewportCommand};
 
     let title_bar_response = ui.interact(
         title_bar_rect,
@@ -829,13 +1075,7 @@ fn title_bar_ui(ui: &mut egui::Ui, title_bar_rect: eframe::epaint::Rect, _title:
         Sense::click_and_drag(),
     );
 
-    painter.line_segment(
-        [
-            title_bar_rect.left_bottom() + vec2(1.0, 0.0),
-            title_bar_rect.right_bottom() + vec2(-1.0, 0.0),
-        ],
-        ui.visuals().widgets.noninteractive.bg_stroke,
-    );
+    // Border removed - no underline under header
 
     // Left-side (top-left) controls: ping button
     ui.scope_builder(
