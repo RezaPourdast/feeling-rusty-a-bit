@@ -79,8 +79,8 @@ pub struct MyApp {
     app_state: AppState,
     selected_provider: DnsProvider,
     dns_state: DnsState,
-    custom_primary: [String; 4],
-    custom_secondary: [String; 4],
+    custom_primary: String,
+    custom_secondary: String,
     operation_sender: Option<mpsc::Sender<OperationResult>>,
     operation_receiver: Option<mpsc::Receiver<OperationResult>>,
     show_second_window: bool,
@@ -91,6 +91,8 @@ pub struct MyApp {
     show_clear_confirmation: bool,
     show_custom_dns_window: bool,
     background_texture: Option<TextureHandle>,
+    ping_background_texture: Option<TextureHandle>,
+    custom_dns_background_texture: Option<TextureHandle>,
     social_logos: std::collections::HashMap<String, TextureHandle>,
 }
 
@@ -105,10 +107,12 @@ impl MyApp {
             dns_state: DnsState::None,
             // don't create ping thread here — only when secondary window is opened
             ping_value: 0.0,
-            ping_history: VecDeque::with_capacity(5),
+            ping_history: VecDeque::with_capacity(15), // Keep only last 15 data points
             ping_sender: None,
             ping_receiver: None,
             background_texture: None,
+            ping_background_texture: None,
+            custom_dns_background_texture: None,
             social_logos: std::collections::HashMap::new(),
             ..Default::default()
         };
@@ -117,11 +121,11 @@ impl MyApp {
     }
 
     fn load_background_image(&mut self, ctx: &egui::Context) {
-        // Try to load background image from asset folder
+        // Try to load main background image from asset folder
         let image_path = if let Ok(dir) = std::env::current_dir() {
-            dir.join("asset").join("background.png")
+            dir.join("asset").join("main-background.png")
         } else {
-            std::path::PathBuf::from("asset/background.png")
+            std::path::PathBuf::from("asset/main-background.png")
         };
 
         // Try PNG first, then JPG, then WEBP
@@ -143,6 +147,78 @@ impl MyApp {
                     let texture =
                         ctx.load_texture("background", color_image, egui::TextureOptions::LINEAR);
                     self.background_texture = Some(texture);
+                    break;
+                }
+            }
+        }
+    }
+
+    fn load_ping_background_image(&mut self, ctx: &egui::Context) {
+        // Try to load ping background image from asset folder
+        let image_path = if let Ok(dir) = std::env::current_dir() {
+            dir.join("asset").join("ping-background.png")
+        } else {
+            std::path::PathBuf::from("asset/ping-background.png")
+        };
+
+        // Try PNG first, then JPG, then WEBP
+        let paths = vec![
+            image_path.clone(),
+            image_path.with_extension("jpg"),
+            image_path.with_extension("jpeg"),
+            image_path.with_extension("webp"),
+        ];
+
+        for path in paths {
+            if path.exists() {
+                // Load image using image crate
+                if let Ok(img) = image::open(&path) {
+                    let rgba = img.to_rgba8();
+                    let size = [rgba.width() as usize, rgba.height() as usize];
+                    let pixels = rgba.as_flat_samples();
+                    let color_image = ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+                    let texture = ctx.load_texture(
+                        "ping_background",
+                        color_image,
+                        egui::TextureOptions::LINEAR,
+                    );
+                    self.ping_background_texture = Some(texture);
+                    break;
+                }
+            }
+        }
+    }
+
+    fn load_custom_dns_background_image(&mut self, ctx: &egui::Context) {
+        // Try to load custom DNS background image from asset folder
+        let image_path = if let Ok(dir) = std::env::current_dir() {
+            dir.join("asset").join("custom-dns-bg.png")
+        } else {
+            std::path::PathBuf::from("asset/custom-dns-bg.png")
+        };
+
+        // Try PNG first, then JPG, then WEBP
+        let paths = vec![
+            image_path.clone(),
+            image_path.with_extension("jpg"),
+            image_path.with_extension("jpeg"),
+            image_path.with_extension("webp"),
+        ];
+
+        for path in paths {
+            if path.exists() {
+                // Load image using image crate
+                if let Ok(img) = image::open(&path) {
+                    let rgba = img.to_rgba8();
+                    let size = [rgba.width() as usize, rgba.height() as usize];
+                    let pixels = rgba.as_flat_samples();
+                    let color_image = ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+                    let texture = ctx.load_texture(
+                        "custom_dns_background",
+                        color_image,
+                        egui::TextureOptions::LINEAR,
+                    );
+                    self.custom_dns_background_texture = Some(texture);
                     break;
                 }
             }
@@ -267,6 +343,16 @@ impl eframe::App for MyApp {
             self.load_background_image(ctx);
         }
 
+        // Load ping background image on first update
+        if self.ping_background_texture.is_none() {
+            self.load_ping_background_image(ctx);
+        }
+
+        // Load custom DNS background image on first update
+        if self.custom_dns_background_texture.is_none() {
+            self.load_custom_dns_background_image(ctx);
+        }
+
         // Load social logos on first update
         if self.social_logos.is_empty() {
             self.load_social_logos(ctx);
@@ -278,6 +364,27 @@ impl eframe::App for MyApp {
                 d.insert_temp(egui::Id::new("background_texture"), Some(texture.clone()));
             });
         }
+
+        // Store ping background texture in context for ping window to access
+        if let Some(ref texture) = self.ping_background_texture {
+            ctx.data_mut(|d| {
+                d.insert_temp(
+                    egui::Id::new("ping_background_texture"),
+                    Some(texture.clone()),
+                );
+            });
+        }
+
+        // Store custom DNS background texture in context for custom DNS window to access
+        if let Some(ref texture) = self.custom_dns_background_texture {
+            ctx.data_mut(|d| {
+                d.insert_temp(
+                    egui::Id::new("custom_dns_background_texture"),
+                    Some(texture.clone()),
+                );
+            });
+        }
+
         if let Some(receiver) = &self.operation_receiver {
             if let Ok(result) = receiver.try_recv() {
                 self.handle_operation_result(result);
@@ -294,10 +401,11 @@ impl eframe::App for MyApp {
             if let Ok(ping) = ping_rx.try_recv() {
                 self.ping_value = ping;
                 // Add to history, keeping only last 5 values
-                self.ping_history.push_back(ping);
-                if self.ping_history.len() > 5 {
+                // Keep only last 15 data points
+                if self.ping_history.len() >= 15 {
                     self.ping_history.pop_front();
                 }
+                self.ping_history.push_back(ping);
                 ctx.request_repaint();
             }
         }
@@ -385,37 +493,54 @@ impl eframe::App for MyApp {
 
         // Show confirmation dialog for Clear DNS
         if self.show_clear_confirmation {
+            use ui_colors::{BUTTON_SUCCESS, BUTTON_TEXT};
+
             egui::Window::new("Confirm Clear DNS")
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
-                    ui.label("Are you sure you want to clear the DNS configuration?");
-                    ui.label("This will reset DNS to DHCP/automatic.");
+                    ui.label(
+                        egui::RichText::new(
+                            "Are you sure you want to clear the DNS configuration?",
+                        )
+                        .color(egui::Color32::WHITE),
+                    );
+                    ui.label(
+                        egui::RichText::new("This will reset DNS to DHCP/automatic.")
+                            .color(egui::Color32::WHITE),
+                    );
                     ui.add_space(10.0);
 
-                    ui.horizontal(|ui| {
+                    // Buttons at bottom right with margin
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                        // Add margin from right
+                        ui.add_space(10.0);
+
+                        // Cancel button (transparent gray) - right side
                         if ui
                             .add_sized(
                                 Vec2::new(80.0, 30.0),
-                                egui::Button::new(
-                                    egui::RichText::new("Cancel").color(egui::Color32::WHITE),
-                                )
-                                .fill(egui::Color32::from_rgb(178, 34, 34))
-                                .corner_radius(8),
+                                egui::Button::new(egui::RichText::new("Cancel").color(BUTTON_TEXT))
+                                    .fill(egui::Color32::from_rgba_unmultiplied(100, 100, 100, 100)) // Transparent gray
+                                    .corner_radius(6),
                             )
                             .clicked()
                         {
                             self.show_clear_confirmation = false;
                         }
+
+                        ui.add_space(3.0); // Closer spacing
+
+                        // Clear DNS button (green) - left side
                         if ui
                             .add_sized(
                                 Vec2::new(80.0, 30.0),
                                 egui::Button::new(
-                                    egui::RichText::new("Clear DNS").color(egui::Color32::WHITE),
+                                    egui::RichText::new("Clear DNS").color(BUTTON_TEXT),
                                 )
-                                .fill(egui::Color32::from_rgb(34, 139, 34))
-                                .corner_radius(8),
+                                .fill(BUTTON_SUCCESS)
+                                .corner_radius(6),
                             )
                             .clicked()
                         {
@@ -431,73 +556,43 @@ impl eframe::App for MyApp {
 }
 
 impl MyApp {
-    fn render_ip_input(ui: &mut egui::Ui, octets: &mut [String; 4], label: &str) -> bool {
-        let mut is_valid = true;
-        let mut next_focus_id: Option<egui::Id> = None;
-
+    fn render_ip_input(ui: &mut egui::Ui, ip: &mut String, label: &str) -> bool {
         ui.horizontal(|ui| {
-            ui.label(format!("{}: ", label));
+            ui.label(egui::RichText::new(format!("{}: ", label)).color(egui::Color32::WHITE));
 
-            for (i, octet) in octets.iter_mut().enumerate() {
-                // Validate octet value (check before borrowing)
-                let octet_str = octet.clone();
-                let octet_num = octet_str.parse::<u8>().ok();
-                let is_octet_valid = octet_str.is_empty() || octet_num.is_some();
-                is_valid = is_valid && is_octet_valid;
+            let field_id = egui::Id::new(label);
+            // Check validation before creating text_edit to avoid borrow issues
+            let ip_clone = ip.clone();
+            let is_valid = ip_clone.is_empty() || Self::is_valid_ip(&ip_clone);
 
-                let field_id = egui::Id::new((label, i));
-                let mut text_edit = egui::TextEdit::singleline(octet)
-                    .desired_width(40.0)
-                    .char_limit(3)
-                    .id(field_id);
+            let mut text_edit = egui::TextEdit::singleline(ip)
+                .desired_width(200.0)
+                .id(field_id)
+                .text_color(egui::Color32::WHITE); // Default white text
 
-                // Add red text color if invalid
-                if !octet_str.is_empty() && !is_octet_valid {
-                    text_edit = text_edit.text_color(egui::Color32::RED);
-                }
-
-                let response = ui.add_sized(Vec2::new(40.0, 20.0), text_edit);
-
-                if response.changed() {
-                    let old_len = octet.len();
-                    let filtered: String = octet.chars().filter(|c| c.is_ascii_digit()).collect();
-                    let new_len = filtered.len();
-                    *octet = filtered;
-
-                    // Auto-advance to next octet if exactly 3 digits entered
-                    // Check if we just reached 3 characters (was less than 3, now is 3)
-                    if new_len == 3 && old_len != 3 && i < 3 {
-                        let next_id = egui::Id::new((label, i + 1));
-                        next_focus_id = Some(next_id);
-                        // Request focus immediately
-                        ui.ctx().memory_mut(|mem| {
-                            mem.request_focus(next_id);
-                        });
-                    }
-                }
-
-                if i < 3 {
-                    ui.label(egui::RichText::new(".").size(16.0));
-                }
+            if !ip_clone.is_empty() && !is_valid {
+                text_edit = text_edit.text_color(egui::Color32::RED);
             }
+
+            ui.add_sized(Vec2::new(200.0, 20.0), text_edit);
         });
 
-        // Request focus for next field after all fields are rendered
-        if let Some(next_id) = next_focus_id {
-            ui.ctx().memory_mut(|mem| {
-                mem.request_focus(next_id);
-            });
-        }
+        // Validate after rendering
+        ip.is_empty() || Self::is_valid_ip(ip)
+    }
 
-        // Show validation error message
-        if !is_valid {
-            ui.colored_label(
-                egui::Color32::RED,
-                "⚠️ Invalid IP address format (each octet must be 0-255)",
-            );
+    fn is_valid_ip(ip: &str) -> bool {
+        let parts: Vec<&str> = ip.split('.').collect();
+        if parts.len() != 4 {
+            return false;
         }
-
-        is_valid
+        for part in parts {
+            // parse::<u8>() already ensures the value is 0-255
+            if part.parse::<u8>().is_err() {
+                return false;
+            }
+        }
+        true
     }
 
     fn render_status_section(&mut self, ui: &mut egui::Ui) {
@@ -561,10 +656,7 @@ impl MyApp {
             ("Quad9", DnsProvider::quad9()),
             (
                 "Custom",
-                DnsProvider::custom(
-                    Self::octets_to_ip(&self.custom_primary),
-                    Self::octets_to_ip(&self.custom_secondary),
-                ),
+                DnsProvider::custom(self.custom_primary.clone(), self.custom_secondary.clone()),
             ),
         ];
 
@@ -662,10 +754,8 @@ impl MyApp {
         });
 
         if matches!(self.selected_provider, DnsProvider::Custom { .. }) {
-            self.selected_provider = DnsProvider::custom(
-                Self::octets_to_ip(&self.custom_primary),
-                Self::octets_to_ip(&self.custom_secondary),
-            );
+            self.selected_provider =
+                DnsProvider::custom(self.custom_primary.clone(), self.custom_secondary.clone());
         }
     }
 
@@ -822,9 +912,6 @@ impl MyApp {
     }
 
     /// Convert octet array to IP address string.
-    fn octets_to_ip(octets: &[String; 4]) -> String {
-        octets.join(".")
-    }
 
     fn render_secondary_viewport(&mut self, ctx: &egui::Context) {
         if !self.show_second_window {
@@ -846,7 +933,7 @@ impl MyApp {
         };
 
         let keep_open = std::cell::Cell::new(true);
-        let window_size = egui::vec2(230.0, 180.0);
+        let window_size = egui::vec2(400.0, 300.0); // Increased size for chart
         let screen_center = ctx.input(|i| {
             let info = i.viewport();
             info.outer_rect
@@ -859,7 +946,7 @@ impl MyApp {
         ctx.show_viewport_immediate(
             viewport_id,
             egui::ViewportBuilder::default()
-                .with_title("Ping")
+                .with_title("Ping-Monitor")
                 .with_inner_size(window_size)
                 .with_position(position)
                 .with_resizable(true)
@@ -872,45 +959,181 @@ impl MyApp {
                     }
 
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        ui.vertical_centered(|ui| {
-                            ui.add_space(40.0);
-                            ui.heading(" Ping Monitor");
-                            ui.add_space(20.0);
-                            ui.label(
-                                egui::RichText::new(ping_text.clone())
-                                    .size(28.0)
-                                    .color(ping_color),
-                            );
+                        // Draw ping background image with low opacity if available
+                        // Use the full viewport rect to cover entire window including decorations
+                        if let Some(texture) = ctx.data(|d| {
+                            d.get_temp::<Option<TextureHandle>>(egui::Id::new(
+                                "ping_background_texture",
+                            ))
+                        }) {
+                            if let Some(ref tex) = texture {
+                                let painter = ui.painter();
+                                // Get the viewport rect which covers the entire window
+                                let viewport_rect = ui.ctx().viewport_rect();
+                                // Increased opacity for more visible background (0.3 = 30% opacity)
+                                let tint = egui::Color32::from_rgba_unmultiplied(
+                                    255,
+                                    255,
+                                    255,
+                                    (255.0 * 0.3) as u8,
+                                );
+                                painter.image(
+                                    tex.id(),
+                                    viewport_rect,
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(0.0, 0.0),
+                                        egui::pos2(1.0, 1.0),
+                                    ),
+                                    tint,
+                                );
+                            }
+                        }
 
-                            ui.add_space(20.0);
-                            ui.horizontal(|ui| {
-                                ui.label("History: ");
-                                if ping_history.is_empty() {
-                                    ui.label(
-                                        egui::RichText::new("—")
-                                            .size(10.0)
-                                            .color(egui::Color32::GRAY),
-                                    );
+                        ui.vertical(|ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.heading(" Ping Monitor");
+                                ui.add_space(10.0);
+                                ui.label(
+                                    egui::RichText::new(ping_text.clone())
+                                        .size(28.0)
+                                        .color(ping_color),
+                                );
+                            });
+
+                            ui.add_space(10.0);
+
+                            // Ping history chart
+                            if !ping_history.is_empty() {
+                                // Color the line based on current ping value
+                                let line_color = if ping_value == 0.0 {
+                                    egui::Color32::LIGHT_GRAY
+                                } else if ping_value < 100.0 {
+                                    egui::Color32::GREEN
+                                } else if ping_value < 200.0 {
+                                    egui::Color32::YELLOW
                                 } else {
-                                    for &value in ping_history.iter().rev() {
-                                        let history_color = if value == 0.0 {
-                                            egui::Color32::LIGHT_GRAY
-                                        } else if value < 100.0 {
-                                            egui::Color32::GREEN
-                                        } else if value < 200.0 {
-                                            egui::Color32::YELLOW
-                                        } else {
-                                            egui::Color32::RED
-                                        };
-                                        ui.label(
-                                            egui::RichText::new(format!("{:.0}", value))
-                                                .size(12.0)
-                                                .color(history_color),
+                                    egui::Color32::RED
+                                };
+
+                                // Draw custom chart with margins
+                                let chart_height = 150.0;
+                                let chart_margin = 40.0; // Margin on left and right
+                                let chart_width = ui.available_width() - (chart_margin * 2.0);
+                                let (chart_rect, _) = ui.allocate_exact_size(
+                                    egui::vec2(chart_width, chart_height),
+                                    egui::Sense::hover(),
+                                );
+                                // Offset the rect to add left margin
+                                let chart_rect =
+                                    chart_rect.translate(egui::vec2(chart_margin, 0.0));
+
+                                let painter = ui.painter();
+
+                                // Draw background
+                                painter.rect_filled(
+                                    chart_rect,
+                                    0.0,
+                                    egui::Color32::from_rgba_unmultiplied(20, 20, 20, 100),
+                                );
+
+                                // Find min/max for scaling
+                                let min_val = ping_history
+                                    .iter()
+                                    .copied()
+                                    .fold(f64::INFINITY, f64::min)
+                                    .max(0.0);
+                                let max_val = ping_history
+                                    .iter()
+                                    .copied()
+                                    .fold(f64::NEG_INFINITY, f64::max)
+                                    .max(100.0);
+                                let range = (max_val - min_val).max(1.0);
+
+                                // Draw subtle grid lines (horizontal)
+                                let grid_color =
+                                    egui::Color32::from_rgba_unmultiplied(150, 150, 150, 30); // Light gray, low opacity
+                                for i in 0..=4 {
+                                    let y =
+                                        chart_rect.min.y + (chart_rect.height() / 4.0) * i as f32;
+                                    painter.line_segment(
+                                        [
+                                            egui::pos2(chart_rect.min.x, y),
+                                            egui::pos2(chart_rect.max.x, y),
+                                        ],
+                                        egui::Stroke::new(1.0, grid_color),
+                                    );
+                                }
+
+                                // Draw subtle vertical grid lines
+                                if ping_history.len() > 1 {
+                                    let num_vertical_lines = (ping_history.len() - 1).min(10); // Max 10 vertical lines
+                                    for i in 0..=num_vertical_lines {
+                                        let x = chart_rect.min.x
+                                            + (chart_rect.width() / num_vertical_lines as f32)
+                                                * i as f32;
+                                        painter.line_segment(
+                                            [
+                                                egui::pos2(x, chart_rect.min.y),
+                                                egui::pos2(x, chart_rect.max.y),
+                                            ],
+                                            egui::Stroke::new(1.0, grid_color),
                                         );
-                                        ui.add_space(6.0);
                                     }
                                 }
-                            })
+
+                                // Draw ping line
+                                if ping_history.len() > 1 {
+                                    let points: Vec<egui::Pos2> = ping_history
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(i, &value)| {
+                                            let x = chart_rect.min.x
+                                                + (chart_rect.width()
+                                                    / (ping_history.len() - 1).max(1) as f32)
+                                                    * i as f32;
+                                            let normalized = (value - min_val) / range;
+                                            let y = chart_rect.max.y
+                                                - (chart_rect.height() * normalized as f32);
+                                            egui::pos2(x, y)
+                                        })
+                                        .collect();
+
+                                    // Draw line segments
+                                    for i in 0..points.len() - 1 {
+                                        painter.line_segment(
+                                            [points[i], points[i + 1]],
+                                            egui::Stroke::new(2.0, line_color),
+                                        );
+                                    }
+
+                                    // Draw points
+                                    for point in &points {
+                                        painter.circle_filled(*point, 3.0, line_color);
+                                    }
+                                }
+
+                                // Draw Y-axis labels
+                                let label_color = egui::Color32::WHITE;
+                                for i in 0..=4 {
+                                    let value = max_val - (range / 4.0) * i as f64;
+                                    let y =
+                                        chart_rect.min.y + (chart_rect.height() / 4.0) * i as f32;
+                                    painter.text(
+                                        egui::pos2(chart_rect.min.x - 5.0, y),
+                                        egui::Align2::RIGHT_CENTER,
+                                        format!("{:.0}", value),
+                                        egui::FontId::monospace(10.0),
+                                        label_color,
+                                    );
+                                }
+                            } else {
+                                ui.centered_and_justified(|ui| {
+                                    ui.label(
+                                        egui::RichText::new("Waiting for ping data...")
+                                            .color(egui::Color32::GRAY),
+                                    );
+                                });
+                            }
                         });
                     });
                 }
@@ -934,7 +1157,7 @@ impl MyApp {
         use ui_constants::*;
 
         let keep_open = std::cell::Cell::new(true);
-        let window_size = egui::vec2(350.0, 220.0);
+        let window_size = egui::vec2(300.0, 240.0);
         let screen_center = ctx.input(|i| {
             let info = i.viewport();
             info.outer_rect
@@ -964,38 +1187,119 @@ impl MyApp {
                     }
 
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        ui.vertical_centered(|ui| {
+                        // Draw custom DNS background image with low opacity if available
+                        // Use the full viewport rect to cover entire window including decorations
+                        if let Some(texture) = ctx.data(|d| {
+                            d.get_temp::<Option<TextureHandle>>(egui::Id::new(
+                                "custom_dns_background_texture",
+                            ))
+                        }) {
+                            if let Some(ref tex) = texture {
+                                let painter = ui.painter();
+                                // Get the viewport rect which covers the entire window
+                                let viewport_rect = ui.ctx().viewport_rect();
+                                // Increased opacity for more visible background (0.3 = 30% opacity)
+                                let tint = egui::Color32::from_rgba_unmultiplied(
+                                    255,
+                                    255,
+                                    255,
+                                    (255.0 * 0.3) as u8,
+                                );
+                                painter.image(
+                                    tex.id(),
+                                    viewport_rect,
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(0.0, 0.0),
+                                        egui::pos2(1.0, 1.0),
+                                    ),
+                                    tint,
+                                );
+                            }
+                        }
+
+                        ui.vertical(|ui| {
                             ui.add_space(SPACING_MEDIUM);
-                            ui.heading("📝 Custom DNS Settings");
+                            // Heading - outside the frame, centered horizontally
+                            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                                ui.label(
+                                    egui::RichText::new("Custom DNS Settings")
+                                        .color(egui::Color32::WHITE)
+                                        .size(18.0),
+                                );
+                            });
                             ui.add_space(SPACING_SMALL);
 
-                            Self::render_ip_input(ui, custom_primary, "Primary DNS");
-                            ui.add_space(5.0);
-                            Self::render_ip_input(ui, custom_secondary, "Secondary DNS");
+                            // Wrap everything else in a custom frame (like main window)
+                            let frame = egui::Frame::group(ui.style())
+                                .fill(egui::Color32::from_rgba_unmultiplied(60, 60, 65, 45)) // Same transparent blurry effect
+                                .corner_radius(12.0); // Same rounded corners
+                            frame.show(ui, |ui| {
+                                ui.set_width(ui.available_width()); // Use full available width
+                                ui.vertical(|ui| {
+                                    ui.add_space(12.0);
+                                    Self::render_ip_input(ui, custom_primary, "1st DNS ");
+                                    ui.add_space(5.0);
+                                    Self::render_ip_input(ui, custom_secondary, "2nd DNS");
 
-                            ui.add_space(SPACING_SMALL);
+                                    // Example hint text
+                                    ui.add_space(3.0);
+                                    ui.label(
+                                        egui::RichText::new("Example: 8.8.8.8, 1.1.1.1")
+                                            .color(egui::Color32::from_rgba_unmultiplied(
+                                                150, 150, 150, 150,
+                                            ))
+                                            .size(11.0),
+                                    );
 
-                            ui.horizontal(|ui| {
-                                if ui.button("Clear").clicked() {
-                                    *custom_primary = [
-                                        String::new(),
-                                        String::new(),
-                                        String::new(),
-                                        String::new(),
-                                    ];
-                                    *custom_secondary = [
-                                        String::new(),
-                                        String::new(),
-                                        String::new(),
-                                        String::new(),
-                                    ];
-                                }
+                                    ui.add_space(5.0);
 
-                                ui.add_space(SPACING_SMALL);
+                                    // Buttons at bottom right
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Min),
+                                        |ui| {
+                                            // Close/Save button (green)
+                                            use ui_colors::BUTTON_SUCCESS;
+                                            if ui
+                                                .add_sized(
+                                                    Vec2::new(70.0, 30.0),
+                                                    egui::Button::new(
+                                                        egui::RichText::new("Save")
+                                                            .color(egui::Color32::WHITE)
+                                                            .size(12.0),
+                                                    )
+                                                    .fill(BUTTON_SUCCESS)
+                                                    .corner_radius(6.0),
+                                                )
+                                                .clicked()
+                                            {
+                                                keep_open.set(false);
+                                            }
 
-                                if ui.button("Close").clicked() {
-                                    keep_open.set(false);
-                                }
+                                            ui.add_space(5.0);
+
+                                            // Clear button (transparent)
+                                            if ui
+                                                .add_sized(
+                                                    Vec2::new(70.0, 30.0),
+                                                    egui::Button::new(
+                                                        egui::RichText::new("Clear")
+                                                            .color(egui::Color32::WHITE)
+                                                            .size(12.0),
+                                                    )
+                                                    .fill(egui::Color32::from_rgba_unmultiplied(
+                                                        100, 100, 100, 100,
+                                                    )) // Transparent gray
+                                                    .corner_radius(6.0),
+                                                )
+                                                .clicked()
+                                            {
+                                                *custom_primary = String::new();
+                                                *custom_secondary = String::new();
+                                            }
+                                        },
+                                    );
+                                    ui.add_space(5.0);
+                                });
                             });
                         });
                     });
@@ -1007,10 +1311,8 @@ impl MyApp {
 
         // Update provider when Custom is selected (sync IPs in real-time)
         if matches!(self.selected_provider, DnsProvider::Custom { .. }) {
-            self.selected_provider = DnsProvider::custom(
-                Self::octets_to_ip(&self.custom_primary),
-                Self::octets_to_ip(&self.custom_secondary),
-            );
+            self.selected_provider =
+                DnsProvider::custom(self.custom_primary.clone(), self.custom_secondary.clone());
         }
     }
 }
