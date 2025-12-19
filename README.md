@@ -16,6 +16,14 @@ Each project is self-contained in its own folder.
 | 4 | [4-Image_Viewer](4-Image_Viewer/) | Simple program to load and display images. |
 | 5 | [5-Ping_Test](5-Ping_Test/) | Network ping test utility. |
 | 6 | [5-ping-test-v2](5-ping-test-v2/) | Improved version of Ping Test with additional features. |
+| 7 | [6-dns-setter](dns-setter/) | -->  [Dnsight](https://github.com/RezaPourdast/DNsight) |
+
+
+all of this lead to building my first app 
+
+you can check it out 
+
+** [Dnsight](https://github.com/RezaPourdast/DNsight) **
 
 ---
 
